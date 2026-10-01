@@ -1,0 +1,60 @@
+# FireSim CIRCT Chia loop: human runbook
+
+prerequisite:
+  description: Passwordless SSH to the local manager host is required by both Chia and FireSim.
+  commands: |
+    ssh -o BatchMode=yes 127.0.0.1 true
+    ssh -o BatchMode=yes localhost true
+
+start_cluster:
+  commands: |
+    source /home/firesim/miniforge3/etc/profile.d/conda.sh
+    cd /scratch/jfx/fsim-circt/sims/firesim
+    source ./sourceme-manager.sh --skip-ssh-setup
+    cd /scratch/jfx/fsim-circt
+    mkdir -p sims/firesim/deploy/build-farm sims/firesim/deploy/run-farm
+    chia up automation/chia_firesim_circt/cluster.yaml
+    chia status --chia-cluster automation/chia_firesim_circt/cluster.yaml
+
+job_submission:
+  description: >-
+    This is a localhost shared-checkout cluster. Do not add
+    --working-dir /scratch/jfx/fsim-circt: Ray would package and upload the
+    35 GiB checkout, while the worker already has that exact path mounted.
+  command_shape: >-
+    chia job submit -- python /scratch/jfx/fsim-circt/automation/chia_firesim_circt/loop.py <loop-options>
+
+model:
+  default: Codex CLI default model
+  per_loop_override: --model <model-name>
+  example: --model <your-codex-model>
+  live_control_file: automation/chia_firesim_circt/control.yaml
+  live_change: Change `model` in control.yaml; the next Codex iteration uses it without restarting the job.
+
+preflight:
+  description: Verify Chia, Codex CLI, FireSim CLI, and configuration without compiling RTL.
+  command: |
+    chia job submit -- \
+      python /scratch/jfx/fsim-circt/automation/chia_firesim_circt/loop.py --iterations 1 --verify preflight
+  with_model: |
+    chia job submit -- \
+      python /scratch/jfx/fsim-circt/automation/chia_firesim_circt/loop.py --iterations 1 --verify preflight --model <model-name>
+
+autonomous_full_loop:
+  description: >-
+    One bounded autonomous task. Each iteration asks Codex for one incremental
+    porting step, then runs replacertl compile, Verilator metasimulation, and
+    the U250 build/boot gate in that order. A failed gate is supplied to the
+    next iteration. A full pass continues porting until Codex explicitly emits
+    LOOP_COMPLETE: yes; the FireMarshal poweroff workload cleanly powers down
+    Buildroot, then run-farm termination runs before the next iteration.
+  command: |
+    chia job submit -- \
+      python /scratch/jfx/fsim-circt/automation/chia_firesim_circt/loop.py --iterations 12 --verify full
+  with_model: |
+    chia job submit -- \
+      python /scratch/jfx/fsim-circt/automation/chia_firesim_circt/loop.py --iterations 12 --verify full --model <model-name>
+
+
+stop_cluster:
+  command: chia down automation/chia_firesim_circt/cluster.yaml

@@ -1,0 +1,37 @@
+# Local Chia cluster for the FireSim CIRCT-port loop.
+#
+# The worker is deliberately not containerized: it uses the installed Codex CLI,
+# the authenticated local Codex session, the checkout's conda environment, and
+# the locally attached U250.  Chia requires passwordless SSH to localhost.
+# The worker shares /scratch/jfx/fsim-circt with the submitter.  Submit the
+# absolute loop.py path without Ray's --working-dir option; that option packages
+# and uploads the whole checkout, which is both redundant and too large.
+cluster_name: firesim-circt-local
+
+provider:
+  head_ip: 127.0.0.1
+
+auth:
+  ssh_user: ${USER}
+
+available_node_types:
+  firesim_circt_agent:
+    # CodexLLM.prompt and the verification function are both scheduled here.
+    resources: {"codex_creds": 1, "firesim_manager": 1}
+    num_workers: 1
+    compatible_ips: [127.0.0.1]
+    worker_env_commands:
+      - "source /home/firesim/miniforge3/etc/profile.d/conda.sh && cd /scratch/jfx/fsim-circt/sims/firesim && source ./sourceme-manager.sh --skip-ssh-setup && cd /scratch/jfx/fsim-circt"
+
+head_env_commands:
+  - "source /home/firesim/miniforge3/etc/profile.d/conda.sh && cd /scratch/jfx/fsim-circt/sims/firesim && source ./sourceme-manager.sh --skip-ssh-setup && cd /scratch/jfx/fsim-circt"
+
+head_start_ray_commands:
+  - ray stop
+  - ray start --head --port=6379 --include-dashboard=True --dashboard-agent-listen-port=0
+
+worker_start_ray_commands:
+  - ray stop
+  - ray start --address=$RAY_HEAD_IP:6379 --dashboard-agent-listen-port=0
+
+file_mounts: {}

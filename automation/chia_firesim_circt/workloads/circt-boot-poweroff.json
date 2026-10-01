@@ -1,0 +1,5 @@
+{
+  "name": "circt-boot-poweroff",
+  "base": "br-base.json",
+  "command": "echo 'CIRCT FireSim boot smoke test passed; powering off cleanly.'"
+}
