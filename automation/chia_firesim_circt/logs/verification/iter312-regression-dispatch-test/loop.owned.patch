@@ -1,0 +1,232 @@
+--- automation/chia_firesim_circt/logs/verification/iter312-regression-dispatch-test/loop.before.py	2026-10-03 22:39:59.345969197 +0000
++++ automation/chia_firesim_circt/loop.py	2026-10-03 22:42:08.963547227 +0000
+@@ -9,6 +9,8 @@
+ from __future__ import annotations
+ 
+ import argparse
++import fcntl
++import hashlib
+ import json
+ import os
+ import re
+@@ -37,6 +39,9 @@
+ BAREMETAL_WORKLOAD_SOURCE = AUTOMATION / "workloads/circt-metasim-bare.json"
+ BAREMETAL_WORKLOAD_NAME = "circt-metasim-bare"
+ BAREMETAL_PASS_MARKER = "CIRCT_METASIM_BARE: PASS"
++REGRESSION_ROOT = AUTOMATION / "workloads/circt-metasim-bare"
++REGRESSION_GROUPS = ("integer", "memory", "control", "atomics", "csr", "traps", "vm",
++                     "interrupts", "fp", "icache", "workloads", "uart")
+ RECIPE = "circt_u250_firesim_rocket_singlecore"
+ MANAGER_ENV = "cd /scratch/jfx/fsim-circt/sims/firesim && source ./sourceme-manager.sh --skip-ssh-setup"
+ METASIM_RUNTIME = DEPLOY / "config_runtime_metasim.yaml"
+@@ -288,7 +293,7 @@
+                     stdout_tail = _append_tail(stdout_tail, line)
+                 else:
+                     stderr_tail = _append_tail(stderr_tail, line)
+-                manager_log_match = FIRESIM_LOG_RE.search(line)
++                manager_log_match = FIRESIM_LOG_RE.search(stdout_tail + "\n" + stderr_tail)
+                 if manager_log_match:
+                     firesim_log_path = manager_log_match.group("path")
+     returncode = process.wait()
+@@ -304,14 +309,16 @@
+     action: str,
+     log_dir: Path,
+     runtime_config: Path = DEPLOY / "config_runtime.yaml",
++    *, name: str | None = None, wall_timeout: int | None = None,
+ ) -> CommandResult:
+     # This is intentionally the FireSim manager, not an SSH invocation.  The
+     # manager owns all build-farm and run-farm communication.
+-    return _run_and_log(
+-        action,
+-        _manager_command(action, runtime_config),
+-        log_dir,
+-    )
++    command = _manager_command(action, runtime_config)
++    if wall_timeout is not None:
++        # GNU timeout bounds the manager and its process group, including a stalled WFI run.
++        command = ["timeout", "--signal=TERM", "--kill-after=30s", f"{wall_timeout}s",
++                   "bash", "-lc", f"{MANAGER_ENV} && cd deploy && exec {shlex.join(command)}"]
++    return _run_and_log(name or action, command, log_dir)
+ 
+ 
+ def _workspace_snapshot() -> str:
+@@ -371,35 +378,112 @@
+     return _run_and_log(name, ["bash", "-lc", command], log_dir)
+ 
+ 
+-def _run_baremetal_workload_and_cleanup(
+-    log_dir: Path,
+-    runtime_config: Path,
+-    suffix_tag: str,
+-) -> list[CommandResult]:
+-    """Run the bounded bare-metal metasim and require its UART PASS marker."""
+-    workload = _run_manager("runworkload", log_dir, runtime_config)
+-    results = [workload]
+-    if workload.ok:
+-        marker = _run_and_log(
+-            "verify_baremetal_uart",
+-            [
+-                sys.executable, str(AUTOMATION / "verify_baremetal_uart.py"),
+-                "--results-root", str(DEPLOY / "results-workload"),
+-                "--workload-name", BAREMETAL_WORKLOAD_NAME,
+-                "--suffix-tag", suffix_tag,
+-                "--pass-marker", BAREMETAL_PASS_MARKER,
+-            ],
+-            log_dir,
+-        )
+-        results.append(marker)
+-    # Always release the local metasim slot, even when the guest or marker
+-    # check fails. This is manager-owned cleanup, not a direct host action.
+-    results.append(_run_manager("terminaterunfarm", log_dir, runtime_config))
++def _run_metasim_regressions(log_dir: Path, run_id: str) -> list[CommandResult]:
++    """Smoke, combined suites, and first-version standalones; cleanup every launch."""
++    results = []
++    preparation = [sys.executable, str(AUTOMATION / "regression_gate.py"), "prepare",
++                   "--root", str(REGRESSION_ROOT), "--deploy", str(DEPLOY),
++                   "--log-dir", str(log_dir), "--versions", str(AUTOMATION / "logs/regression-versions")]
++    result = _run_and_log("prepare_rocket_regressions",
++                          ["bash", "-lc", f"{MANAGER_ENV} && {shlex.join(preparation)}"], log_dir)
++    results.append(result)
++    if not result.ok:
++        return results
++    inputs = json.loads((log_dir / "regression-inputs.json").read_text())
++    names = [BAREMETAL_WORKLOAD_NAME, "circt-fame-suite", "circt-fame-rocket-suite"]
++    if inputs["initial_standalones_required"]:
++        names.extend("circt-fame-" + group for group in REGRESSION_GROUPS)
++    generated = REPO / "sims/firesim/sim/generated-src/xilinx_alveo_u250" / (
++        "xilinx_alveo_u250-firesim-FireSim-FireSimRocketConfig-BaseXilinxAlveoU250Config")
++    def candidate_identity():
++        paths = sorted([*generated.glob("FireSim-generated.*"), generated / "AbstractClockGate.v"])
++        return {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
++    candidate = candidate_identity()
++    if not any(path.endswith(".sv") for path in candidate):
++        return results + [CommandResult("regression_candidate_identity", 1, "", "Candidate RTL missing")]
++    report = {"candidate_artifacts": candidate, "input_version": inputs["version"], "required_workloads": names,
++              "rocket_differential": inputs["rocket_differential"], "workloads": []}
++    print(f"Required Rocket regression dispatch: {names}", flush=True)
++    for index, binary in enumerate(names):
++        case_dir = log_dir / binary
++        case_dir.mkdir(parents=True, exist_ok=True)
++        suffix = f"{_safe_filename(run_id)}-{binary}"
++        runtime_config = case_dir / "runtime.yaml"
++        runtime = yaml.safe_load((DEPLOY / "config_runtime.yaml").read_text())
++        runtime["metasimulation"]["metasimulation_enabled"] = True
++        runtime["metasimulation"]["metasimulation_host_simulator"] = "verilator"
++        plusargs = runtime["metasimulation"].get("metasimulation_only_plusargs", "")
++        plusargs = re.sub(r"(?:^|\s)\+max-cycles=\S+", "", plusargs)
++        runtime["metasimulation"]["metasimulation_only_plusargs"] = plusargs + " +max-cycles=1000000000"
++        runtime["workload"].update(workload_name=binary + ".json", suffix_tag=suffix,
++                                   terminate_on_completion=True)
++        runtime_config.write_text(yaml.safe_dump(runtime, sort_keys=False))
++        print(f"{binary}: Verilator; max-cycles=1000000000; wall-time=3600s; runtime={runtime_config}", flush=True)
++        case_results = []
++        launched = False
++        try:
++            if candidate_identity() != candidate:
++                raise ValueError("Candidate RTL/collateral changed during regression dispatch")
++            actions = ("builddriver", "launchrunfarm", "infrasetup", "runworkload") if index == 0 else (
++                "launchrunfarm", "infrasetup", "runworkload")
++            for action in actions:
++                # Cleanup even a failed launch, which can leave a partially launched farm.
++                launched = launched or action == "launchrunfarm"
++                result = _run_manager(action, case_dir, runtime_config,
++                                      name=f"{binary}_{action}", wall_timeout=3600)
++                case_results.append(result)
++                if not result.ok:
++                    break
++            if case_results and all(r.ok for r in case_results):
++                if candidate_identity() != candidate:
++                    raise ValueError("Candidate RTL/collateral changed during metasim")
++                if binary == BAREMETAL_WORKLOAD_NAME:
++                    command = [sys.executable, str(AUTOMATION / "verify_baremetal_uart.py"),
++                               "--results-root", str(DEPLOY / "results-workload"),
++                               "--workload-name", binary, "--suffix-tag", suffix,
++                               "--pass-marker", BAREMETAL_PASS_MARKER]
++                else:
++                    command = [sys.executable, str(AUTOMATION / "regression_gate.py"), "validate",
++                               "--root", str(REGRESSION_ROOT), "--log-dir", str(case_dir),
++                               "--results-root", str(DEPLOY / "results-workload"),
++                               "--binary", binary, "--suffix-tag", suffix]
++                    if binary not in {"circt-fame-rocket-suite", "circt-fame-uart"}:
++                        command.extend(["--reference", inputs["portable_reference"]])
++                case_results.append(_run_and_log(f"{binary}_validate", command, case_dir))
++        except Exception as error:
++            case_results.append(CommandResult(f"{binary}_dispatch", 1, "", str(error)))
++        finally:
++            if launched:
++                case_results.append(_run_manager("terminaterunfarm", case_dir, runtime_config,
++                                                name=f"{binary}_terminaterunfarm", wall_timeout=300))
++        results.extend(case_results)
++        case_report = {"binary": binary, "runtime_yaml": str(runtime_config),
++                       "suffix_tag": suffix, "gates": [asdict(r) for r in case_results]}
++        validation_path = case_dir / "validation-result.json"
++        if validation_path.is_file():
++            case_report["validation"] = json.loads(validation_path.read_text())
++        report["workloads"].append(case_report)
++        (log_dir / "regression-results.json").write_text(json.dumps(report, indent=2) + "\n")
++        if any(not r.ok for r in case_results):
++            return results
++    if inputs["initial_standalones_required"]:
++        (Path(inputs["archive"]) / "standalones-passed.json").write_text(
++            json.dumps({"verification": str(log_dir), "workloads": names}, indent=2) + "\n")
++    results.append(CommandResult("required_rocket_regressions", 0,
++                                  "All required Rocket metasim workloads validated; " + inputs["rocket_differential"], ""))
+     return results
+ 
+ 
+ @ChiaFunction(resources={"firesim_manager": 0.01})
+-def verify_with_firesim(
++def verify_with_firesim(mode: str, run_id: str, run_hardware_gate: bool = True) -> list[dict[str, object]]:
++    # Runtime YAMLs are unique, but manager slots and candidate builds are shared.
++    # An advisory lock serializes cooperating Chia verification workers.
++    with (AUTOMATION / ".verification.lock").open("a") as lock:
++        fcntl.flock(lock, fcntl.LOCK_EX)
++        return _verify_with_firesim(mode, run_id, run_hardware_gate)
++
++
++def _verify_with_firesim(
+     mode: str,
+     run_id: str,
+     run_hardware_gate: bool = True,
+@@ -447,31 +531,7 @@
+     results.append(asdict(baremetal_workload))
+     if not baremetal_workload.ok:
+         return results
+-    metasim_suffix_tag = f"{_safe_filename(run_id)}-bare"
+-
+-    # Run the transformed RTL in Verilator metasimulation with that workload.
+-    metasim_config_result = _run_and_log(
+-        "make_metasim_runtime_config",
+-        [
+-            sys.executable, str(AUTOMATION / "make_metasim_runtime_config.py"),
+-            "--source", str(DEPLOY / "config_runtime.yaml"),
+-            "--output", str(METASIM_RUNTIME),
+-            "--workload-name", f"{BAREMETAL_WORKLOAD_NAME}.json",
+-            "--suffix-tag", metasim_suffix_tag,
+-        ],
+-        log_dir,
+-    )
+-    results.append(asdict(metasim_config_result))
+-    if not metasim_config_result.ok:
+-        return results
+-    for action in ("builddriver", "launchrunfarm", "infrasetup"):
+-        result = _run_manager(action, log_dir, METASIM_RUNTIME)
+-        results.append(asdict(result))
+-        if not result.ok:
+-            return results
+-    metasim_workload_results = _run_baremetal_workload_and_cleanup(
+-        log_dir, METASIM_RUNTIME, metasim_suffix_tag,
+-    )
++    metasim_workload_results = _run_metasim_regressions(log_dir, run_id)
+     results.extend(asdict(result) for result in metasim_workload_results)
+     if any(not result.ok for result in metasim_workload_results):
+         return results
+@@ -644,7 +704,7 @@
+             print(f"\n=== FireSim verification {iteration}: SUMMARY ===\n{feedback}\n", flush=True)
+             verification_passed = all(item["returncode"] == 0 for item in verification)
+             baremetal_passed = verification_passed and any(
+-                item["name"] == "verify_baremetal_uart" for item in verification
++                item["name"] == "required_rocket_regressions" for item in verification
+             )
+             if args.verify in {"full", "boot"}:
+                 if baremetal_passed:

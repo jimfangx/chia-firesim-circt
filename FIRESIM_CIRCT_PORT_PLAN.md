@@ -1,5 +1,306 @@
 # FireSim Golden Gate Scala-FIRRTL → CIRCT Port
 
+## Storage cleanup record (2026-10-14)
+
+At the user's request, 8,731 old uncompressed `.mlir` dumps were removed from
+`iteration167-u250-target-matrix` through `iteration189-u250-target-matrix`,
+recovering 586 GiB. Their logs, JSON comparisons/annotations, final RTL, and
+compressed archives remain; historical report paths to the deleted MLIR are
+intentionally unavailable. Iterations 190 onward, the active compiler/build,
+and all immutable SFC golden fixtures were preserved. Do not regenerate these
+obsolete dumps merely because a historical comparison links to them.
+
+## PRIORITY CHANGE: generalized U250 target matrix and shorter repeated testing (2026-10-13)
+
+The user requested broad target coverage instead of repeatedly running only
+the already-passing Rocket tests. At the next implementation turn, prioritize
+compiling the U250 target matrix through CIRCT, inventorying failures, and
+removing target/bridge/clock/model assumptions exposed by that matrix. Do not
+continue an indefinite sequence of optional Print-only attachments without
+checking the new targets. This user instruction supersedes the earlier
+requirement to execute both long Rocket suites on every unchanged iteration.
+
+SFC golden generation completed successfully for **all 13 recipes** with
+`PLATFORM: xilinx_alveo_u250` in
+`sims/firesim-staging/sample_config_build_recipes.yaml`. The results are in
+the dedicated archive:
+
+```text
+/scratch/jfx/fsim-circt/automation/chia_firesim_circt/golden/u250-sfc-20261013/
+```
+
+Read `manifest.json` there: it records per-recipe generation status, exact
+commands, assembly-jar hashes, input FIRRTL/annotation hashes, corrected
+platform names, and output hashes. A `passed` entry contains actual SFC
+MIDAS-transformed `design/FireSim-generated.sv` and collateral; `building` or
+`failed` is not a usable golden. Never overwrite completed golden outputs.
+Generation uses snapshotted assembly jars and separate input/output paths,
+without invoking Vivado or modifying the active CIRCT candidate directory.
+The resumable generator is
+`automation/chia_firesim_circt/generate_u250_sfc_goldens.py`.
+
+The matrix consists of:
+
+| Recipe family | Target configuration | Platform configuration |
+| --- | --- | --- |
+| Rocket single core, no NIC | `FireSimRocketConfig` | `BaseXilinxAlveoU250Config` |
+| Rocket quad core, no NIC | `FireSimQuadRocketConfig` | `BaseXilinxAlveoU250Config` |
+| BOOM single core | `FireSimLargeBoomConfig` | `BaseXilinxAlveoU250Config` |
+| Rocket single core with NIC | `WithNIC_FireSimRocketConfig` | `BaseXilinxAlveoU250Config` |
+| Gemmini Rocket | `FireSimLeanGemminiRocketConfig` | `BaseXilinxAlveoU250Config` |
+| Saturn Rocket | `FireSimREFV256D128RocketConfig` | `BaseXilinxAlveoU250Config` |
+| Saturn Shuttle | `FireSimGENV256D128ShuttleConfig` | `BaseXilinxAlveoU250Config` |
+| Dual Rocket split base, 0, 1 | `WithDefaultFireSimBridges_WithFireSimConfigTweaks_chipyard.DualRocketConfig` | `DualRocketTileQSFPBase`, `DualRocketTileQSFP0`, `DualRocketTileQSFP1` |
+| Quad Rocket ring base, 0, 1 | `FireSimQuadRocketSbusRingNoCConfig` | `QuadTileRingNoCU250Base`, `QuadTileRingNoCU250Partition0`, `QuadTileRingNoCU250Partition1` |
+
+The last three recipes name obsolete classes `QuadTileRingNoCBase`,
+`QuadTileRingNoC0`, `QuadTileRingNoC1`. The generator explicitly maps them to
+the corresponding existing U250 classes above and records requested/effective
+values. Do not substitute an unpartitioned base config or silently drop a
+partitioned target. Keep each of the 13 recipe results distinct.
+
+For every completed golden, run the **same archived pre-MIDAS FIRRTL and
+annotations** through the CIRCT Golden Gate pipeline in a separate candidate
+directory, with that recipe's effective platform semantics. Record a matrix
+row with SFC status, CIRCT compile status, comparison status, exact artifact
+paths, and any unsupported feature. A rejected target is an implementation
+gap, not a passing comparison. The next core compiler changes should remove
+these gaps across targets; do not replace the target with the known Rocket
+configuration just to get a green result.
+
+Compare annotation/model/channel identity, bridge constructors, memory
+geometry and behavior, clock/reset/token scheduling, MMIO and driver ABI,
+XDC and platform interfaces against the actual SFC outputs. Compiler-generated
+names and equivalent lowering can differ: textual SV equality is not required,
+but normalized structural checks must be supplemented by behavioral or formal
+checks where structure differs. A compile-only pass is not semantic parity.
+Schedule targeted metasim execution for newly supported targets and full
+coverage periodically; partitioned QSFP designs also need their appropriate
+multi-partition integration tests. These fixtures do not prove Linux boot.
+
+Testing cadence now implemented in `automation/chia_firesim_circt/loop.py`:
+
+- Keep CIRCT compilation/provenance and a fresh bare-metal smoke execution
+  each iteration, plus focused tests for every changed compiler feature.
+- Reuse previously passing combined Rocket-suite results only when emitted
+  RTL/collateral, driver sources/build wiring, runtime config, relevant
+  environment/tool inputs, and workload version match. Reports explicitly
+  identify reused evidence and its original verification directory.
+- Run both long suites on input changes, new workload versions, every tenth
+  verification at the latest, and before hardware verification. Failures
+  invalidate the cache. Standalone workload groups remain required once for
+  each new workload version. Do not delete tests merely because they pass.
+- Expand compile/comparison coverage to this matrix rather than spending
+  unchanged iterations repeating the same long Rocket execution. Integrating
+  that matrix into automated harness gates is still required; this note and
+  SFC generation alone do not claim CIRCT support for the targets.
+
+## Current host recovery: PCI device absent despite loaded XDMA (2026-10-08 17:06 UTC)
+
+The user's next enumeratefpgas run,
+`deploy/logs/2026-10-08--17-01-12-enumeratefpgas-TTWTK7JO8T7V04EG.log` in the
+test checkout, loaded xdma.ko successfully and then failed because
+`chmod a+rw /dev/xdma*` found no nodes. Live sysfs still lacks
+0000:01:00.0, confirming the earlier failed flash's PCI removal has not yet
+been recovered. This is not a permission failure on an existing device; do
+not suppress chmod failure or make empty XDMA node sets count as success.
+
+The U250's USB JTAG interface is now visible in host sysfs as 0403:6011,
+product A-U250-A64G, serial 21320733400E. This supersedes the USB-disconnected
+observation below. Its observed USB serial differs from the old database's
+UID Xilinx/21320733400XA; verify the fresh Vivado target UID and regenerate
+the JTAG-to-BDF mapping rather than assuming the old UID remains correct.
+Do not rely on the earlier helper's strict old-UID check for recovery here.
+
+`automation/chia_firesim_circt/u250-recover-xdma.sh` (also copied to
+`/tmp/u250-recover-xdma.sh`) invokes the installed golden PCI reconnect path
+without programming or checking the old JTAG UID, then verifies PCI presence,
+XDMA binding, device nodes, and permissions before retrying enumeratefpgas.
+Its shell syntax is checked; hardware execution needs the user's host terminal.
+After fresh enumeration succeeds, run infrasetup, require a valid live
+fingerprint, then retry Linux. No CIRCT RTL change is indicated by this failure.
+
+## Current host blocker: no USB JTAG target visible (2026-10-08 06:11 UTC)
+
+The user applied and installed the flash-script fix below. The next infrasetup
+(`deploy/logs/2026-10-08--06-08-02-infrasetup-971ITCUH4JLHZFEV.log` in the test
+checkout) now correctly fails with Vivado Lab's `ERROR: [Labtoolstcl 44-199]
+No matching targets found on connected servers: localhost`. This occurs at
+`get_hw_targets`, before selecting a board or programming. The agent's read
+of the host USB sysfs inventory contains no FTDI/Xilinx/Digilent programmer;
+check/restore the U250 USB JTAG connection to lab, or establish the correct
+remote hardware-server connection if the cable is on another host. This is a
+hardware-access blocker, not evidence of a CIRCT RTL/driver failure.
+
+The failed flash already removed PCI function 0000:01:00.0 and unloaded XDMA;
+the function is currently absent from sysfs. Restore PCI enumeration before
+retrying (the installed golden `firesim-fpga-util.py --reconnect-bdf` path
+rescans and enables MMIO). After restoring JTAG, first run the golden
+`get_serial_dev_for_fpgas.tcl` in batch mode and require the expected UID
+Xilinx/21320733400XA. Then reconnect the PCI function, rerun infrasetup, and
+require the live fingerprint to return 0x46697265 before runworkload. No RTL
+or bitstream rebuild is required to resolve this host connection blocker.
+
+Host-terminal recovery helper: `sudo bash /tmp/u250-jtag-check-and-reconnect.sh`.
+It first runs the golden JTAG enumeration Tcl in batch mode and requires the
+expected UID before invoking the installed PCI reconnect utility. It never
+programs a bitstream. Shell syntax and preflight ordering are checked; it
+still needs execution outside this sandbox with the cable connected.
+
+## Immediate FPGA fix: programming failure was reported as success (2026-10-08)
+
+The host-terminal read-only probe returned INIT_DONE=1 and both fingerprint
+registers=0xdeadbeef for three consecutive samples. The actual flash session
+in `/home/firesim/vivado_lab.log` (05:51:07, PID 94065) identifies the cause:
+`program_fpga.tcl` failed at its unconditional initial `close_hw_target` with
+`ERROR: [Labtoolstcl 44-142] There is no current hw_target and no option value
+given for 'hw_target'.` It never reached `program_hw_devices`. The launcher
+used `-mode tcl`, swallowed its captured output on return code zero, and
+incorrectly printed `Successfully programmed FPGA`. The FPGA was left with
+the previously loaded image/state; successful staging did not mean flashing.
+
+The main worktree now fixes three U250 scripts: guard the initial close with
+`current_hw_target -quiet` in both `program_fpga.tcl` and
+`get_serial_dev_for_fpgas.tcl`, and use `-mode batch` in `util.py` so sourced
+script errors return failure. Preserve and integrate this fix. The patch
+`automation/chia_firesim_circt/patches/u250-flash-failure.patch` applies cleanly
+to the golden test checkout but still needs application there and installation
+to `/usr/local/bin` from that checkout. The existing installer is
+`/tmp/align-firesim-u250-scripts.sh --install` (run with sudo).
+
+Verification: actual Vivado Lab 2023.1 with a deliberately failing Tcl script
+and no hardware access returns 0 in Tcl mode, 1 in batch mode. Tcl command
+stubs validate unopened/opened target cases, missing serial, and failed
+programming; the Python launcher test checks batch mode and preservation of
+failure status/output. Logs/tests are in `/tmp/u250-flash-script-tests/`.
+No bitstream rebuild is required for these host-script fixes. After installing,
+rerun infrasetup and require the live master probe and driver's fingerprint
+check to pass before runworkload. Reflashing and FPGA Linux boot remain pending.
+
+## FPGA runtime blocker: fingerprint check before Linux (2026-10-08)
+
+The separate `/scratch/jfx/chipyard-circt-test` checkout now has the host
+hierarchy patch and successfully produced the U250 Rocket bitstream in
+`sims/firesim/deploy/results-build/2026-10-08--04-29-57-circt_u250_firesim_rocket_singlecore/`.
+This supersedes the earlier hierarchy note's statements that the patch was
+unapplied there and bitstream success unverified. Linux boot is still unverified.
+
+The 05:51:18 FPGA workload exited with driver status 1 before DRAM/bridge
+initialization: `FireSim fingerprint: 0xdeadbeef`, then
+`Invalid FireSim fingerprint`. The manager's `Job ... completed!` means the
+screen session exited; it does not establish successful target execution.
+
+Read-only comparison established that the compiled bitstream's control
+decoder, simulation-master bank/MCR file, read/write dispatchers and arbiters,
+and F1Shim match the current regenerated RTL. The generated driver uses
+INIT_DONE=0x220, PRESENCE_READ=0x224, PRESENCE_WRITE=0x228, consistent with the
+built decoder and MCR indexing. Driver and RTL both expect/reset to
+0x46697265. The staged bitstream and built bitstream have the same SHA-256:
+`8dfb862f491076b1b34d627b6226d597fc6d797a2c403444532884557ca69443`.
+There is no evidence yet that the immediate failure requires a CIRCT-specific
+driver ABI change.
+
+The golden `firesim-generate-fpga-db.py` deliberately writes 0xDEADBEEF while
+enumerating boards, then reflashes them to restore the fingerprint. This is
+a diagnostic lead, not proof that enumeration caused this failure. Determine
+the live master register values and verify JTAG-to-BDF mapping/reset before
+changing the driver or bypassing the fingerprint check. Preserve the actual
+run logs and report failed driver exits as failures in verification results.
+
+`automation/chia_firesim_circt/u250-master-probe.c` is a read-only, volatile
+MMIO probe for these checked register addresses. It compiles with warnings
+as errors and passes regular-file fixtures for valid, enumeration-marker,
+and invalid values without modifying the fixtures. Actual hardware access
+is not available in this agent's sandbox; the probe still needs a host-terminal
+run. After correcting hardware state, require the matching driver's
+`+check-fingerprint` to pass before retrying Linux.
+
+## FPGA priority: preserve host hierarchy normalization (2026-10-08)
+
+The U250 Rocket build in the separate `/scratch/jfx/chipyard-circt-test`
+checkout crashed in Vivado 2023.2.2 while processing the shell-injected
+`RAM_STYLE ULTRA` synthesis constraint. Its compiler-emitted synthesis XDC
+matches the SFC comment-only file, and the shell command is unchanged. The
+CIRCT assembly pipeline instead produced 98 nested `sim` instances versus
+one in SFC. This is a suspected crash trigger, not a confirmed root cause.
+
+A host hierarchy normalization fix is now implemented in this main worktree:
+`sim/goldengate-circt/lib/Support/SimulatorRTL.cpp` and
+`tools/goldengate.cpp`. Preserve these changes and the new
+`test/Support/HostHierarchyTest.cpp`; do not duplicate or replace the work.
+Driver headers are prepared against the assembly boundaries first, then
+CIRCT's native inliner collapses single-use construction wrappers before XDC
+path resolution. Removed wrappers become private so their unused bodies are
+eliminated. New declaration names lose repeated `sim_` prefixes with collision
+handling. Target, SRAM, helper modules, attached inner symbols, and explicitly
+referenced XDC modules retain their hierarchy. Inline blackbox sources are
+attached before dead-module elimination; the retained JSON archive is historical
+and is not replayed against deleted assembly modules.
+
+Verification: host hierarchy, XDC emission, and interface-header unit tests
+pass. Applying the final normalization to the failing checkout's actual Rocket
+boundary removes 97 wrappers, reduces the FPGATop-to-cache path from 106 to 9
+instance levels, leaves one `sim` level, emits a shallow generated-clock XDC,
+and passes Verilator lint with fatal warnings enabled. A 1,024-cycle sequential
+comparison matches the original 98-wrapper register path cycle for cycle.
+Artifacts and logs are under `/tmp/fsim-wrapper-collapse/`.
+
+The patch for the separate test checkout is
+`automation/chia_firesim_circt/patches/host-hierarchy-normalization.patch`;
+`git apply --check` succeeds there. It has not been applied to that checkout.
+Commit the integrated main-worktree change through the existing checkpoint
+procedure, then run the required fresh driver/runtime regression gates.
+Rebuild CIRCT RTL and retry Vivado synthesis before claiming the segfault or
+FPGA bitstream build is fixed. Runtime and bitstream success remain unverified
+for this hierarchy change.
+
+## Priority: fix clean CIRCT metasim builds (2026-10-08)
+
+**At the next iteration, integrate the missing `.const.vh` emission and build
+dependencies before proceeding with further compiler features.** The fresh
+`/scratch/jfx/chipyard-circt-test` checkout failed `builddriver` with
+`No rule to make target 'FireSim-generated.const.vh'`. CIRCT emits `.const.h`
+and `.defines.vh`, but does not emit the Verilog interface constants header
+required by `sim/midas/src/main/cc/Makefile` and the metasim `top.sv`.
+`.defines.vh` contains DDR shell settings and cannot substitute for `.const.vh`.
+
+The main Chia worktree still contains an SFC-generated `.const.vh` dated
+2026-10-01. Earlier successful metasim gates therefore do not establish that
+this header is generated by CIRCT or that a fresh checkout builds successfully.
+At the time of this note, the fix is applied as uncommitted changes in the test
+checkout, but is absent from the main Chia compiler and published checkpoints.
+
+A prepared patch is preserved at
+`automation/chia_firesim_circt/patches/emit-const-vh.patch`. Inspect and adapt it
+to the current compiler revision; do not overwrite other shared-worktree edits.
+It adds native `.const.vh` emission from validated FPGATop/F1Shim port widths
+in `MetasimInterfaceHeader.cpp`, extends the header tests, and adds the emitted
+file to the Golden Gate grouped outputs/copy step and Verilator dependencies
+in `sim/make/goldengate.mk` and `sim/make/verilator.mk`. Commit and push the
+integrated fix using the existing checkpoint procedure.
+
+Focused header tests, emission from the test checkout's Rocket boundary, and
+Verilator lint of its simulator RTL passed for the prepared patch. A complete
+driver build and runtime regression with the fix still need verification.
+Have the verification harness build with a fresh output directory, or archive
+the existing mutable generated `.const.vh` before rebuilding. Require a newly
+CIRCT-emitted `circt-ingestion/FireSim-generated.const.vh` and its copied
+top-level counterpart before `builddriver`, then run all required metasim
+regressions. Preserve the immutable SFC golden fixtures. FireSim manager
+actions remain owned by the verification harness.
+
+## Updated notes:
+
+1. The FireSim FAME disseratation is here: scratch/jfx/fsim-circt/dissertation.pdf with a markdown version here: scratch/jfx/fsim-circt/dissertation.md for your reference.
+2. For upcoming iterations, use subagents for independent analysis or coding when useful. Keep shared-worktree edits coordinated through the main agent. Wait for all spawned subagents, incorporate their results, and close or stop them before returning.
+3. Push to the 2 working github repos (git@github.com:jimfangx/chia-firesim-circt.git for the outer repo, and https://github.com/jimfangx/chia-firesim-submodule-circt for changes in sims/firesim) as soon as there is significant progress (as backup), does't matter if it doens't pass my first baremetal test. Push frequently.
+4. The user-requested Rocket bare-metal regression suite in `automation/chia_firesim_circt/workloads/circt-metasim-bare/` is now a required Chia verification gate. At the next iteration, inspect and integrate the gates specified in **Required Chia Rocket bare-metal regression gate** below. The existing smoke workload alone is insufficient. Minimal harness changes needed to run these regressions and return their results to the implementation agent are explicitly in scope; this wiring is verification work, not a completed compiler milestone. FireSim manager actions remain owned by the verification harness.
+
+IMPORTANT: Inspect the last section of /scratch/jfx/fsim-circt/automation/chia_firesim_circt/logs/codex_20261004_204001.log, which represents the last run; continue from progress made there.
+
+Additionally: manage space, remove or zip/compress old logs as needed. AVOID RUNNING OUT OF DISK SPACE.
+
+
 ## Mission
 
 Port FireSim's Golden Gate compiler from the legacy Scala FIRRTL Compiler (SFC) infrastructure to CIRCT/MLIR while preserving FireSim simulation semantics.
@@ -300,9 +601,141 @@ metasimulation:
 
 Run the normal FireSim manager metasim workflow (`builddriver`,
 `launchrunfarm`, `infrasetup`, then `runworkload`) against the transformed RTL
-and `br-base-uniform.json`.  Advance to `buildbitstream` for the U250 only
-after this Verilator gate passes.  The harness must retain complete stdout,
-stderr, and the FireSim manager log path for this gate.
+using the existing smoke workload and the required Rocket regression suites
+below. Retain `br-base-uniform.json` for the separate Linux integration gate.
+Advance to `buildbitstream` for the U250 only after the required Verilator
+gates pass. The harness must retain complete stdout, stderr, and the FireSim
+manager log path for each gate.
+
+#### Required Chia Rocket bare-metal regression gate
+
+The test sources, binaries, FireSim workload descriptors, validator, and
+coverage documentation are in:
+
+```text
+/scratch/jfx/fsim-circt/automation/chia_firesim_circt/workloads/circt-metasim-bare/
+```
+
+Read that directory's `README.md` before wiring the gate. These tests cover
+integer arithmetic, memory/cache and store masks, control flow, atomics, CSRs,
+traps, Sv39/PMP, CLINT interrupts/WFI, floating point, instruction-cache
+coherence, CRC32/SHA-256, matrix multiplication, pointer chasing, and direct
+UART output. Run the same ELF artifacts through each compiler's simulator.
+
+**Required execution and cadence:**
+
+1. On initial integration, and whenever the test sources, runtime, platform
+   assumptions, or toolchain change, build all 14 new ELF binaries and their
+   descriptors. Run the portable programs through Spike and validate the log
+   checker. Archive the resulting ELF hashes and reference results by version.
+   Spike validates the workloads; it does not replace CIRCT metasimulation.
+2. After every successful CIRCT `replacertl` compile and Verilator build in
+   the `metasim`, `boot`, or `full` verification profiles, the harness must
+   run these workloads in order against that candidate RTL:
+
+   - `circt-metasim-bare`: the existing quick smoke gate;
+   - `circt-fame-suite`: all 11 portable groups, currently 90,141 checks;
+   - `circt-fame-rocket-suite`: all portable groups plus direct UART/FIFO
+     traffic and eight ordered output epochs, currently 90,805 checks.
+
+   A `compile`-only profile does not constitute a regression-suite pass.
+3. During first integration and before declaring the Rocket/FAME-1 milestone
+   passed, also run all 12 standalone `circt-fame-<group>` programs in metasim:
+   `integer`, `memory`, `control`, `atomics`, `csr`, `traps`, `vm`,
+   `interrupts`, `fp`, `icache`, `workloads`, and `uart`. Thereafter use the
+   relevant standalone programs to diagnose a failing combined-suite group.
+4. Stop progression to U250/Linux gates on any required workload, validator,
+   or cleanup failure. Do not increment a regression-success streak from the
+   original smoke marker alone. Resume compiler work using the failing group's
+   logs; do not skip, weaken, or replace checks merely to obtain a pass.
+
+Prepare the suite from the project environment with:
+
+```bash
+fame_workload_root=/scratch/jfx/fsim-circt/automation/chia_firesim_circt/workloads/circt-metasim-bare
+make -C "$fame_workload_root" suite manifests
+make -C "$fame_workload_root" validate-spike
+(cd "$fame_workload_root" && python3 -m unittest -v test_validator)
+```
+
+`firesim-workloads/` contains the generated descriptors. Install each selected
+descriptor in `sims/firesim/deploy/workloads/`; its absolute ELF and dummy
+rootfs paths permit direct FireSim execution without changing the original
+FireMarshal smoke manifest. Use a separate transient runtime YAML per workload
+and a unique suffix tag containing the iteration and workload name. Select
+`metasimulation_enabled: true`, `metasimulation_host_simulator: verilator`,
+and `workload_name: <binary-name>.json`. The existing
+`make_metasim_runtime_config.py` supports `--workload-name` and `--suffix-tag`;
+ensure the emitted YAML actually selects Verilator. Reuse the candidate build
+only when its RTL and collateral identity match this iteration's compile.
+
+For each selected workload, use the manager-owned `launchrunfarm`,
+`infrasetup`, and `runworkload` sequence, with `builddriver` where needed.
+Always call `terminaterunfarm` after a launched farm, including setup, runtime,
+timeout, or validator failures. Keep both a target-cycle limit and an external
+wall-time timeout; a stalled WFI/tohost path or a missing final result is a
+failed test. Set sufficient limits to complete the suite and retain the chosen
+limits in the logs. Do not race the active smoke run or another verification
+run over shared runtime configs, run directories, or manager slots.
+
+**Acceptance must use the full validator, not a PASS substring search.**
+Resolve the exact `uartlog` belonging to this iteration/workload, then run:
+
+```bash
+python3 "$fame_workload_root/check_uart.py" /path/to/this-run/uartlog \
+  --binary circt-fame-suite \
+  --reference "$fame_workload_root/spike-results/expected-results.json"
+```
+
+The portable suite must match the archived checks and signatures; its current
+aggregate signature is `0x78194504c338c229`. The checker requires one complete
+suite, the correct ordered test events, consistent counts and signatures,
+and no failure/fatal markers. For UART-bearing programs it also requires all
+eight direct `FAME_UART: DATA` lines and `FAME_UART: END` exactly once, in
+order, within the UART test. The ordinary FESVR printf transcript does not
+substitute for target UART output.
+
+Establish an SFC metasim baseline for the **same ELF hashes** in a separate,
+mutable reference run directory; preserve the existing immutable SFC compiler
+and U250 build fixtures. Capture a validated full Rocket-suite baseline with:
+
+```bash
+python3 "$fame_workload_root/check_uart.py" /path/to/sfc/uartlog \
+  --binary circt-fame-rocket-suite --write-reference /path/to/sfc-expected.json
+python3 "$fame_workload_root/check_uart.py" /path/to/circt/uartlog \
+  --binary circt-fame-rocket-suite --reference /path/to/sfc-expected.json
+```
+
+Use the corresponding binary name/reference entry for standalone programs.
+Until the UART-bearing SFC baseline exists, still run the CIRCT program and
+the validator without `--reference`, and explicitly report that differential
+comparison is pending. Do not bless candidate output as an SFC baseline or
+claim differential parity from Spike alone. Before milestone sign-off, repeat
+supported memory-latency/bandwidth and bridge-backpressure configurations,
+retaining matching SFC/CIRCT workload signatures.
+
+Store per-workload command stdout/stderr, FireSim manager logs, exact result
+directory and UART path, validator output, runtime YAML, ELF hashes, and
+reference identity beneath the existing iteration verification directory.
+Use distinct command/gate names so suites cannot overwrite smoke logs. Return
+all required gate return codes and failed group names in the next Codex
+iteration's feedback. Report which suites ran and their signatures; the label
+`full` or a manager exit status alone is not evidence of their execution.
+
+**Harness activation is required.** The current `loop.py` hardcodes the smoke
+workload in `verify_with_firesim`; add the minimal dispatch, workload selection,
+validation, and result aggregation needed for these gates. A running driver or
+Ray worker may retain previously loaded Python code. Confirm activation from
+the next verification transcript and actual suite result directories; edits
+to this plan or to a source file alone do not prove the active runner adopted
+the gates. If it still runs only the smoke workload, explicitly report the
+new gate as pending activation and resolve the runner integration before
+counting a regression pass. Keep manager execution in the harness and return
+to core compiler work after this required integration.
+
+These Rocket workloads supplement Milestone 7's independent FAME semantic
+testbench. They do not replace arbitrary token-schedule/host-reset checks,
+multiclock tests, FAME-5 tests, or enabled Print/AutoCounter bridge tests.
 
 #### Manual Verilator metasim command sequence
 
@@ -1992,6 +2425,11 @@ Declare FAME-1 functionally complete only when all of these hold:
 [ ] existing GCDF1 test passes
 
 [ ] Rocket boots in metasimulation
+
+[ ] required Rocket bare-metal suites pass through the active Chia harness
+
+[ ] identical Rocket ELF artifacts match SFC/CIRCT regression signatures,
+    including direct UART output
 ```
 
 Do not use generated RTL diff as the correctness criterion.

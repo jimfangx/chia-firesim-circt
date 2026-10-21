@@ -9,11 +9,15 @@ the existing FireSim manager commands in sims/firesim/deploy.
 from __future__ import annotations
 
 import argparse
+import fcntl
+import hashlib
 import json
 import os
 import re
+import runpy
 import selectors
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -34,6 +38,12 @@ DEPLOY = REPO / "sims/firesim/deploy"
 AUTOMATION = REPO / "automation/chia_firesim_circt"
 FIREMARSHAL = REPO / "software/firemarshal"
 POWEROFF_WORKLOAD_SOURCE = AUTOMATION / "workloads/circt-boot-poweroff.json"
+BAREMETAL_WORKLOAD_SOURCE = AUTOMATION / "workloads/circt-metasim-bare.json"
+BAREMETAL_WORKLOAD_NAME = "circt-metasim-bare"
+BAREMETAL_PASS_MARKER = "CIRCT_METASIM_BARE: PASS"
+REGRESSION_ROOT = AUTOMATION / "workloads/circt-metasim-bare"
+REGRESSION_GROUPS = ("integer", "memory", "control", "atomics", "csr", "traps", "vm",
+                     "interrupts", "fp", "icache", "workloads", "uart")
 RECIPE = "circt_u250_firesim_rocket_singlecore"
 MANAGER_ENV = "cd /scratch/jfx/fsim-circt/sims/firesim && source ./sourceme-manager.sh --skip-ssh-setup"
 METASIM_RUNTIME = DEPLOY / "config_runtime_metasim.yaml"
@@ -285,7 +295,7 @@ def _run_and_log(
                     stdout_tail = _append_tail(stdout_tail, line)
                 else:
                     stderr_tail = _append_tail(stderr_tail, line)
-                manager_log_match = FIRESIM_LOG_RE.search(line)
+                manager_log_match = FIRESIM_LOG_RE.search(stdout_tail + "\n" + stderr_tail)
                 if manager_log_match:
                     firesim_log_path = manager_log_match.group("path")
     returncode = process.wait()
@@ -301,14 +311,16 @@ def _run_manager(
     action: str,
     log_dir: Path,
     runtime_config: Path = DEPLOY / "config_runtime.yaml",
+    *, name: str | None = None, wall_timeout: int | None = None,
 ) -> CommandResult:
     # This is intentionally the FireSim manager, not an SSH invocation.  The
     # manager owns all build-farm and run-farm communication.
-    return _run_and_log(
-        action,
-        _manager_command(action, runtime_config),
-        log_dir,
-    )
+    command = _manager_command(action, runtime_config)
+    if wall_timeout is not None:
+        # GNU timeout bounds the manager and its process group, including a stalled WFI run.
+        command = ["timeout", "--signal=TERM", "--kill-after=30s", f"{wall_timeout}s",
+                   "bash", "-lc", f"{MANAGER_ENV} && cd deploy && exec {shlex.join(command)}"]
+    return _run_and_log(name or action, command, log_dir)
 
 
 def _workspace_snapshot() -> str:
@@ -358,20 +370,196 @@ def _run_workload_and_cleanup(
     return [workload, cleanup]
 
 
-def _prepare_poweroff_workload(log_dir: Path) -> CommandResult:
-    """Build and install the FireMarshal workload that powers off after boot."""
-    workload = shlex.quote(str(POWEROFF_WORKLOAD_SOURCE))
+def _prepare_workload(name: str, workload_source: Path, log_dir: Path) -> CommandResult:
+    """Build and install a FireMarshal workload before its FireSim gate."""
+    workload = shlex.quote(str(workload_source))
     command = (
         f"{MANAGER_ENV} && cd {shlex.quote(str(FIREMARSHAL))} && "
         f"./marshal build {workload} && ./marshal install --target firesim {workload}"
     )
-    return _run_and_log("prepare_poweroff_workload", ["bash", "-lc", command], log_dir)
+    return _run_and_log(name, ["bash", "-lc", command], log_dir)
+
+
+def _run_metasim_regressions(log_dir: Path, run_id: str,
+                             force_full: bool = False) -> list[CommandResult]:
+    """Smoke, combined suites, and first-version standalones; cleanup every launch."""
+    results = []
+    preparation = [sys.executable, str(AUTOMATION / "regression_gate.py"), "prepare",
+                   "--root", str(REGRESSION_ROOT), "--deploy", str(DEPLOY),
+                   "--log-dir", str(log_dir), "--versions", str(AUTOMATION / "logs/regression-versions")]
+    result = _run_and_log("prepare_rocket_regressions",
+                          ["bash", "-lc", f"{MANAGER_ENV} && {shlex.join(preparation)}"], log_dir)
+    results.append(result)
+    if not result.ok:
+        return results
+    inputs = json.loads((log_dir / "regression-inputs.json").read_text())
+    names = [BAREMETAL_WORKLOAD_NAME, "circt-fame-suite", "circt-fame-rocket-suite"]
+    if inputs["initial_standalones_required"]:
+        names.extend("circt-fame-" + group for group in REGRESSION_GROUPS)
+    generated = REPO / "sims/firesim/sim/generated-src/xilinx_alveo_u250" / (
+        "xilinx_alveo_u250-firesim-FireSim-FireSimRocketConfig-BaseXilinxAlveoU250Config")
+    def candidate_identity():
+        paths = sorted([*generated.glob("FireSim-generated.*"), generated / "AbstractClockGate.v"])
+        return {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
+    candidate = candidate_identity()
+    if not any(path.endswith(".sv") for path in candidate):
+        return results + [CommandResult("regression_candidate_identity", 1, "", "Candidate RTL missing")]
+    # Refresh the smoke execution every turn; reuse long-suite results only
+    # for identical simulator/driver/workload inputs, at most nine times.
+    driver_roots = [REPO / "sims/firesim/sim/midas/src/main/cc",
+                    REPO / "generators/firechip/chip/src/main/cc",
+                    REPO / "generators/firechip/bridgestubs/src/main/cc",
+                    REPO / "generators/testchipip/src/main/resources/testchipip/csrc",
+                    REPO / "generators/firechip/chip/src/main/makefrag/firesim",
+                    REPO / "sims/firesim/sim/make", DEPLOY / "runtools"]
+    driver_inputs = {p for root in driver_roots for p in root.rglob("*")
+                     if p.is_file() and (p.suffix in {".cc", ".cpp", ".c", ".h", ".hpp", ".mk", ".py"}
+                                         or p.name == "Makefile")}
+    driver_inputs.update([DEPLOY / "config_runtime.yaml", DEPLOY / "config_hwdb.yaml",
+                          DEPLOY / "firesim", REPO / "sims/firesim/sim/Makefile",
+                          REPO / "sims/firesim/env.sh", REPO / "sims/firesim/sourceme-manager.sh",
+                          Path(__file__), AUTOMATION / "regression_gate.py"])
+    tools = [shutil.which(tool) for tool in ["verilator", "verilator_bin", "c++", "g++", "make"]]
+    for dependency in [REPO / ".conda-env/riscv-tools/lib/libfesvr.a",
+                       *[Path(tool).resolve() for tool in tools if tool]]:
+        if dependency.is_file():
+            driver_inputs.add(dependency)
+    validation_identity = {"candidate": candidate, "input_version": inputs["version"],
+                           "environment": {k: os.environ.get(k, "") for k in
+                                           ["CXX", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "RISCV",
+                                            "LD_LIBRARY_PATH", "VERILATOR_ROOT"]},
+                           "driver_inputs": {str(p): hashlib.sha256(p.read_bytes()).hexdigest()
+                                             for p in sorted(driver_inputs)}}
+    cache_path = AUTOMATION / "logs/metasim-suite-cache.json"
+    try:
+        cache = json.loads(cache_path.read_text())
+    except (FileNotFoundError, ValueError):
+        cache = {}
+    if not isinstance(cache, dict):
+        cache = {}
+    reuse_suites = (not force_full and not inputs["initial_standalones_required"]
+                   and cache.get("identity") == validation_identity
+                   and (Path(cache.get("verification", "")) / "regression-results.json").is_file()
+                   and cache.get("reuses", 0) < 9)
+    if reuse_suites:
+        names = [BAREMETAL_WORKLOAD_NAME]
+        print(f"Unchanged simulator/driver/workloads: fresh smoke; long-suite evidence "
+              f"reused from {cache['verification']} ({cache.get('reuses', 0) + 1}/9)", flush=True)
+    report = {"candidate_artifacts": candidate, "input_version": inputs["version"], "required_workloads": names,
+              "rocket_differential": inputs["rocket_differential"], "workloads": []}
+    report["suite_evidence"] = {"reused": reuse_suites,
+                                "verification": cache.get("verification") if reuse_suites else str(log_dir),
+                                "reason": "identical simulator, driver and workload inputs" if reuse_suites else "fresh full suites"}
+    print(f"Required Rocket regression dispatch: {names}", flush=True)
+    for index, binary in enumerate(names):
+        case_dir = log_dir / binary
+        case_dir.mkdir(parents=True, exist_ok=True)
+        suffix = f"{_safe_filename(run_id)}-{binary}"
+        runtime_config = case_dir / "runtime.yaml"
+        runtime = yaml.safe_load((DEPLOY / "config_runtime.yaml").read_text())
+        runtime["metasimulation"]["metasimulation_enabled"] = True
+        runtime["metasimulation"]["metasimulation_host_simulator"] = "verilator"
+        plusargs = runtime["metasimulation"].get("metasimulation_only_plusargs", "")
+        plusargs = re.sub(r"(?:^|\s)\+max-cycles=\S+", "", plusargs)
+        runtime["metasimulation"]["metasimulation_only_plusargs"] = plusargs + " +max-cycles=1000000000"
+        runtime["workload"].update(workload_name=binary + ".json", suffix_tag=suffix,
+                                   terminate_on_completion=True)
+        runtime_config.write_text(yaml.safe_dump(runtime, sort_keys=False))
+        print(f"{binary}: Verilator; max-cycles=1000000000; wall-time=3600s; runtime={runtime_config}", flush=True)
+        case_results = []
+        launched = False
+        try:
+            if candidate_identity() != candidate:
+                raise ValueError("Candidate RTL/collateral changed during regression dispatch")
+            actions = ("builddriver", "launchrunfarm", "infrasetup", "runworkload") if index == 0 else (
+                "launchrunfarm", "infrasetup", "runworkload")
+            for action in actions:
+                # Cleanup even a failed launch, which can leave a partially launched farm.
+                launched = launched or action == "launchrunfarm"
+                result = _run_manager(action, case_dir, runtime_config,
+                                      name=f"{binary}_{action}", wall_timeout=3600)
+                case_results.append(result)
+                if not result.ok:
+                    break
+            if case_results and all(r.ok for r in case_results):
+                if candidate_identity() != candidate:
+                    raise ValueError("Candidate RTL/collateral changed during metasim")
+                if binary == BAREMETAL_WORKLOAD_NAME:
+                    command = [sys.executable, str(AUTOMATION / "verify_baremetal_uart.py"),
+                               "--results-root", str(DEPLOY / "results-workload"),
+                               "--workload-name", binary, "--suffix-tag", suffix,
+                               "--pass-marker", BAREMETAL_PASS_MARKER]
+                else:
+                    command = [sys.executable, str(AUTOMATION / "regression_gate.py"), "validate",
+                               "--root", str(REGRESSION_ROOT), "--log-dir", str(case_dir),
+                               "--results-root", str(DEPLOY / "results-workload"),
+                               "--binary", binary, "--suffix-tag", suffix]
+                    if binary not in {"circt-fame-rocket-suite", "circt-fame-uart"}:
+                        command.extend(["--reference", inputs["portable_reference"]])
+                case_results.append(_run_and_log(f"{binary}_validate", command, case_dir))
+        except Exception as error:
+            case_results.append(CommandResult(f"{binary}_dispatch", 1, "", str(error)))
+        finally:
+            if launched:
+                case_results.append(_run_manager("terminaterunfarm", case_dir, runtime_config,
+                                                name=f"{binary}_terminaterunfarm", wall_timeout=300))
+        results.extend(case_results)
+        case_report = {"binary": binary, "runtime_yaml": str(runtime_config),
+                       "suffix_tag": suffix, "gates": [asdict(r) for r in case_results]}
+        validation_path = case_dir / "validation-result.json"
+        if validation_path.is_file():
+            case_report["validation"] = json.loads(validation_path.read_text())
+        report["workloads"].append(case_report)
+        (log_dir / "regression-results.json").write_text(json.dumps(report, indent=2) + "\n")
+        if any(not r.ok for r in case_results):
+            cache_path.unlink(missing_ok=True)
+            return results
+    if inputs["initial_standalones_required"]:
+        (Path(inputs["archive"]) / "standalones-passed.json").write_text(
+            json.dumps({"verification": str(log_dir), "workloads": names}, indent=2) + "\n")
+    if reuse_suites:
+        cache["reuses"] = cache.get("reuses", 0) + 1
+    else:
+        cache = {"identity": validation_identity, "verification": str(log_dir), "reuses": 0}
+    cache_temp = cache_path.with_suffix(".json.tmp")
+    cache_temp.write_text(json.dumps(cache, indent=2) + "\n")
+    cache_temp.replace(cache_path)
+    results.append(CommandResult("required_rocket_regressions", 0,
+                                  ("Fresh smoke passed; unchanged-input long-suite evidence reused; " if reuse_suites
+                                   else "All required Rocket metasim workloads validated; ")
+                                  + inputs["rocket_differential"], ""))
+    return results
 
 
 @ChiaFunction(resources={"firesim_manager": 0.01})
-def verify_with_firesim(
+def verify_with_firesim(mode: str, run_id: str, run_hardware_gate: bool = True) -> list[dict[str, object]]:
+    # Runtime YAMLs are unique, but manager slots and candidate builds are shared.
+    # An advisory lock serializes cooperating Chia verification workers.
+    with (AUTOMATION / ".verification.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        # Chia serializes this function from the long-lived driver. Read the
+        # verification implementation afresh on each dispatch so later edits
+        # take effect without replacing the running driver or Ray worker.
+        # run_path compiles the .py source and does not use a cached .pyc.
+        source = AUTOMATION / "loop.py"
+        source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+        implementation = runpy.run_path(str(source), run_name="firesim_verification")
+        if hashlib.sha256(source.read_bytes()).hexdigest() != source_hash:
+            raise RuntimeError("Verification source changed while loading; retry dispatch")
+        results = implementation["_verify_with_firesim"](mode, run_id, run_hardware_gate)
+        if mode != "none":
+            results.insert(0, asdict(CommandResult(
+                "verification_source", 0,
+                f"Loaded current verification source: {source}\n"
+                f"sha256={source_hash}", "",
+            )))
+        return results
+
+
+def _verify_with_firesim(
     mode: str,
     run_id: str,
+    run_hardware_gate: bool = True,
 ) -> list[dict[str, object]]:
     """Run the configured FireSim verification gate on the local manager worker."""
     if mode == "none":
@@ -390,47 +578,52 @@ def verify_with_firesim(
             results.append(asdict(_run_and_log(f"preflight-{index}", command, log_dir)))
         return results
 
-    poweroff_workload = _prepare_poweroff_workload(log_dir)
-    results = [asdict(poweroff_workload)]
-    if not poweroff_workload.ok:
-        return results
-
     # Gate 1: the exact existing FireSim `make replace-rtl` compiler phase.
     compile_result = _run_manager("replacertl", log_dir)
-    results.append(asdict(compile_result))
-    if not compile_result.ok or mode == "compile":
+    results = [asdict(compile_result)]
+    if not compile_result.ok:
         return results
-
-    # Gate 2: run the transformed RTL as a FireSim metasimulation.  This is a
-    # software RTL simulation; the subsequent hardware gate is what programs
-    # the attached U250.
-    metasim_config_result = _run_and_log(
-        "make_metasim_runtime_config",
+    compiler_provenance = _run_and_log(
+        "verify_circt_replacertl",
         [
-            sys.executable, str(AUTOMATION / "make_metasim_runtime_config.py"),
-            "--source", str(DEPLOY / "config_runtime.yaml"),
-            "--output", str(METASIM_RUNTIME),
+            sys.executable, str(AUTOMATION / "verify_circt_replacertl.py"),
+            str(compile_result.stdout_log_path),
         ],
         log_dir,
     )
-    results.append(asdict(metasim_config_result))
-    if not metasim_config_result.ok:
+    results.append(asdict(compiler_provenance))
+    if not compiler_provenance.ok or mode == "compile":
         return results
-    for action in ("builddriver", "launchrunfarm", "infrasetup"):
-        result = _run_manager(action, log_dir, METASIM_RUNTIME)
-        results.append(asdict(result))
-        if not result.ok:
-            return results
-    metasim_workload_results = _run_workload_and_cleanup(log_dir, METASIM_RUNTIME)
+
+    # Gate 2 uses a tiny tohost-terminating RISC-V program rather than Linux.
+    # It tests transformed target execution, target memory, UART, and a clean
+    # host/target completion path in minutes rather than a Buildroot boot.
+    baremetal_workload = _prepare_workload(
+        "prepare_metasim_bare_workload", BAREMETAL_WORKLOAD_SOURCE, log_dir,
+    )
+    results.append(asdict(baremetal_workload))
+    if not baremetal_workload.ok:
+        return results
+    metasim_workload_results = _run_metasim_regressions(
+        log_dir, run_id, force_full=mode in {"full", "boot"} and run_hardware_gate)
     results.extend(asdict(result) for result in metasim_workload_results)
     if any(not result.ok for result in metasim_workload_results):
         return results
-    if mode == "metasim":
+    if mode == "metasim" or not run_hardware_gate:
         return results
 
     # Gate 3: FireSim's normal U250 flow.  The "full" profile reaches here
     # only after the compile and Verilator gates above pass. buildbitstream intentionally runs
     # replace-rtl again as FireSim's standard end-to-end build prerequisite.
+    # Keep full-mode hardware validation distinct: its Linux workload exercises
+    # the actual U250 image and powers itself off after a successful boot.
+    poweroff_workload = _prepare_workload(
+        "prepare_poweroff_workload", POWEROFF_WORKLOAD_SOURCE, log_dir,
+    )
+    results.append(asdict(poweroff_workload))
+    if not poweroff_workload.ok:
+        return results
+
     build = _run_manager("buildbitstream", log_dir)
     results.append(asdict(build))
     if not build.ok:
@@ -460,7 +653,13 @@ def _agent_prompt(previous_verification: str, iteration: int, total: int, model:
 
 You may read, create, modify, and delete files under {REPO}; keep every source change inside that repository. You are running through the authenticated local Codex CLI: do not use OpenAI APIs or API keys. You may create a well-justified git checkpoint and push it to the configured GitHub remote when the worktree has a coherent, tested milestone; never push unrelated pre-existing changes.
 
-This is a live shared worktree: at the beginning of every turn, reread `FIRESIM_CIRCT_PORT_PLAN.md` (the implementation steps document), run `git status --short`, and inspect fresh edits relevant to your task. Do not assume your resumed context is current, do not reset/revert user changes, and preserve edits made by a user or another process while the loop is running. Changes that arrive during an active Codex turn are supplied in the next iteration's live-worktree snapshot. Preserve Scala Golden Gate as the oracle; port semantics incrementally rather than translating Scala syntax. Work on one small, evidence-backed increment that advances the FAME-1/2/4/5 CIRCT compiler port. Do not claim completion of the overall port.
+This is a live shared worktree. At the beginning of every turn, reread `FIRESIM_CIRCT_PORT_PLAN.md`, paying special attention to any ADDITIONS or CHANGES to the plan, including the new notes at the top. Run `git status --short`, and inspect current compiler sources. Do not assume resumed context is current, reset/revert user changes, or overwrite the immutable SFC fixtures named in the plan.
+
+NON-NEGOTIABLE IMPLEMENTATION SCOPE: work on the actual Golden Gate compiler in `sims/firesim/sim`. The current Scala FIRRTL compiler under `sims/firesim/sim/midas/src/main/scala/midas/` is the executable semantic oracle; inspect and port its behavior, especially `passes/MidasTransforms.scala` and `passes/fame/FAMETransform.scala`. Implement the CIRCT compiler in the plan's `sims/firesim/sim/goldengate-circt/` tree and make only the necessary FireSim build integration under `sims/firesim/sim/` to invoke it. Every implementation turn must make a concrete, evidence-backed change to those core compiler sources or their direct FireSim compiler build wiring.
+
+Strongly prefer core compiler work over `automation/`, FireMarshal, workload JSON, top-level Python tools, runtime YAML, Ray/Chia configuration, logging, provenance guards, and other harness infrastructure. You may make a minimal infrastructure change only when it directly unblocks the current core compiler change or its comparison test. Such a change does not itself count as porting progress: return immediately to the compiler source/build path. Do not substitute a Python checker, log parser, build wrapper, or a claim that SFC was selected for actual CIRCT compiler implementation. If the current FireSim flow invokes SFC, change the compiler source/build integration under `sims/firesim/sim` so it invokes the CIRCT implementation; do not merely detect or report the fallback.
+
+Follow the milestone order in `FIRESIM_CIRCT_PORT_PLAN.md`: preserve the Scala Golden Gate oracle; establish CIRCT ingestion of the SFC handoff; build annotation, target-identity, hierarchy, clock, model, and channel analyses; then port FAME semantics incrementally. Port semantics through CIRCT/MLIR operations, not Scala syntax. For every core change, select the relevant boundary artifact from the recorded SFC golden directories, compare the CIRCT candidate's corresponding FIRRTL/annotation/RTL/collateral output to it, and use the observed match or mismatch to choose the next change. Prefer semantic and structured comparisons (annotation classes, targets, channels, modules, ports, clocks, and emitted collateral) over brittle byte-for-byte RTL equality. State the exact golden artifact compared and the result in the final report. Do not claim completion of the overall port.
 
 For debugging, read the recorded SFC golden-reference section in that steps document. Its immutable fixtures are `/scratch/jfx/fsim-circt/sims/firesim-staging/generated-src/firechip.chip.FireSim.FireSimRocketConfig.sfc-golden-2026-10-01` (the compiler oracle) and `/scratch/jfx/fsim-circt/sims/firesim/deploy/results-build/2026-10-01--04-55-23-circt_u250_firesim_rocket_singlecore/cl_xilinx_alveo_u250-firesim-FireSim-FireSimRocketConfig-BaseXilinxAlveoU250Config.sfc-golden-2026-10-01` (the U250 build-tree reference). Never overwrite or edit either fixture; use them to diagnose a candidate/output mismatch.
 
@@ -495,18 +694,27 @@ def main() -> None:
         "--verify",
         choices=("none", "preflight", "compile", "metasim", "full", "boot"),
         default="preflight",
-        help="Verification profile; full runs compile, Verilator metasim, then U250 boot (boot is a compatibility alias).",
+        help="Verification profile; full runs compile and bare-metal Verilator metasim every iteration, with periodic U250 Linux boot (boot is a compatibility alias).",
     )
     parser.add_argument("--model", default=None, help="Optional Codex CLI model override")
+    parser.add_argument(
+        "--linux-boot-after-bare-successes",
+        type=int,
+        default=15,
+        help="For full/boot verification, run the U250 Linux gate after this many consecutive bare-metal metasim passes (default: 15).",
+    )
     parser.add_argument("--ray-address", default=os.environ.get("RAY_ADDRESS", "auto"))
     args = parser.parse_args()
     if args.iterations < 1:
         parser.error("--iterations must be positive")
+    if args.linux_boot_after_bare_successes < 1:
+        parser.error("--linux-boot-after-bare-successes must be positive")
 
     ray.init(address=args.ray_address)
     start_collector(log_dir=str(AUTOMATION / "profiles"))
     agent = StreamingCodexLLM(
         model=args.model,
+        reasoning_effort="high",
         work_dir=str(REPO),
         # The user explicitly authorizes autonomous repository edits and git
         # checkpoints.  Chia's Codex wrapper implements that via this CLI flag.
@@ -519,6 +727,7 @@ def main() -> None:
     feedback = ""
     loop_run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + f"-pid{os.getpid()}"
     goal_complete = False
+    baremetal_success_streak = 0
     try:
         for iteration in range(1, args.iterations + 1):
             model = _live_model(args.model)
@@ -540,17 +749,64 @@ def main() -> None:
                 print(f"=== Codex iteration {iteration}: EVENT STREAM ===\n{response.stream_result}", flush=True)
             if response.stderr:
                 print(f"=== Codex iteration {iteration}: STDERR ===\n{response.stderr}", flush=True)
-            print(f"=== FireSim verification {iteration}: DISPATCHED ({args.verify}) ===", flush=True)
+            hardware_gate_attempted = (
+                args.verify in {"full", "boot"}
+                and baremetal_success_streak + 1 >= args.linux_boot_after_bare_successes
+            )
+            if args.verify in {"full", "boot"}:
+                if hardware_gate_attempted:
+                    print(
+                        f"=== FireSim verification {iteration}: DISPATCHED ({args.verify}; "
+                        f"bare-metal streak will reach {args.linux_boot_after_bare_successes}, U250 Linux gate enabled) ===",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"=== FireSim verification {iteration}: DISPATCHED ({args.verify}; "
+                        f"bare-metal streak {baremetal_success_streak}/{args.linux_boot_after_bare_successes}, U250 Linux gate deferred) ===",
+                        flush=True,
+                    )
+            else:
+                print(f"=== FireSim verification {iteration}: DISPATCHED ({args.verify}) ===", flush=True)
             verification = get(verify_with_firesim.chia_remote(
                 args.verify,
                 f"{loop_run_id}-iter{iteration}-{args.verify}",
+                hardware_gate_attempted,
                 _chia_tag=f"verify-{iteration}-{args.verify}",
             ))
             feedback = _format_verification(verification)
             print(f"\n=== FireSim verification {iteration}: SUMMARY ===\n{feedback}\n", flush=True)
-            if any(not item["returncode"] == 0 for item in verification):
+            verification_passed = all(item["returncode"] == 0 for item in verification)
+            baremetal_passed = verification_passed and any(
+                item["name"] == "required_rocket_regressions" for item in verification
+            )
+            if args.verify in {"full", "boot"}:
+                if baremetal_passed:
+                    baremetal_success_streak += 1
+                else:
+                    baremetal_success_streak = 0
+                if hardware_gate_attempted:
+                    # A scheduled hardware gate consumes the streak whether it
+                    # passes or fails: after a source change, earn fresh cheap
+                    # functional evidence before spending another U250 boot.
+                    baremetal_success_streak = 0
+                    print(
+                        "U250 Linux gate completed; bare-metal success streak reset to 0.",
+                        flush=True,
+                    )
+                elif baremetal_passed:
+                    print(
+                        f"Bare-metal metasim pass {baremetal_success_streak}/"
+                        f"{args.linux_boot_after_bare_successes}; U250 Linux gate deferred.",
+                        flush=True,
+                    )
+            if not verification_passed:
                 print("Verification failed; its compiler/error tail and full log paths will be supplied to Codex in the next iteration.")
-            elif args.verify in {"full", "boot"} and GOAL_COMPLETE_RE.search(response.result):
+            elif (
+                args.verify in {"full", "boot"}
+                and hardware_gate_attempted
+                and GOAL_COMPLETE_RE.search(response.result)
+            ):
                 goal_complete = True
                 print("The complete FireSim gate passed and Codex declared the port goal achieved; ending the loop.")
                 break

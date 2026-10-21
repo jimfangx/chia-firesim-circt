@@ -1,0 +1,175 @@
+--- a/sim/goldengate-circt/include/goldengate/MetasimInterfaceHeader.h
++++ b/sim/goldengate-circt/include/goldengate/MetasimInterfaceHeader.h
+@@ -7,8 +7,8 @@
+ 
+ namespace goldengate {
+ // FPGATopImp.genHeader's GET_METASIM_INTERFACE_CONFIG section. Analyze the
+-// actual aggregate FPGATop/F1Shim ports before adding the .const.h output
+-// annotation. The current U250 shell has one memory channel, CPU-managed
++// actual aggregate FPGATop/F1Shim ports before adding the .const.h and
++// .const.vh output annotations. The current U250 shell has one memory channel, CPU-managed
+ // AXI4, and no target QSFP/FPGA-managed endpoints. Bridge constructors remain
+ // a separate, unfinished part of the driver header.
+ mlir::LogicalResult prepareMetasimInterfaceHeader(
+--- a/sim/goldengate-circt/lib/Support/MetasimInterfaceHeader.cpp
++++ b/sim/goldengate-circt/lib/Support/MetasimInterfaceHeader.cpp
+@@ -133,8 +133,9 @@
+     if (!cls) return reject("malformed retained header annotation");
+     if (cls.getValue() == AnnotationClasses::OutputFile) {
+       auto suffix = dict.getAs<StringAttr>("fileSuffix");
+-      if (suffix && suffix.getValue() == ".const.h")
+-        return reject("driver header output already exists");
++      if (suffix && (suffix.getValue() == ".const.h" ||
++                     suffix.getValue() == ".const.vh"))
++        return reject("metasim header output already exists");
+     }
+   }
+   std::string body;
+@@ -153,8 +154,41 @@
+       << "\n};\n#undef GET_METASIM_INTERFACE_CONFIG\n"
+          "#endif // GET_METASIM_INTERFACE_CONFIG\n";
+   out.flush();
++  // top.sv consumes these same interface widths as Verilog macros. Derive
++  // both headers from the validated ports so a fresh metasim build does not
++  // depend on collateral left behind by an earlier Scala compiler run.
++  std::string guard = "__";
++  for (unsigned char ch : targetName.bytes())
++    guard += ch >= 'a' && ch <= 'z' ? char(ch - 'a' + 'A') :
++             (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') ?
++             char(ch) : '_';
++  guard += "_H";
++  std::string verilogBody;
++  llvm::raw_string_ostream verilog(verilogBody);
++  verilog << "// Golden Gate-generated Verilog Header\n"
++             "// Interface widths for MIDAS-level simulation.\n"
++          << "`ifndef " << guard << "\n`define " << guard
++          << "\n\n// Simulation Constants\n";
++  auto printVerilogAXI = [&](StringRef prefix, AXIConfig config) {
++    verilog << "`define " << prefix << "_ID_BITS " << config.id << '\n'
++            << "`define " << prefix << "_ADDR_BITS " << config.addr << '\n'
++            << "`define " << prefix << "_DATA_BITS " << config.data << '\n';
++  };
++  printVerilogAXI("CTRL", ctrl);
++  printVerilogAXI("CPU_MANAGED_AXI4", cpu);
++  verilog << "`define CPU_MANAGED_AXI4_PRESENT 1\n"
++          << "`define QSFP_DATA_BITS " << qsfpWidth << '\n';
++  for (unsigned channel = 0; channel < memories; ++channel)
++    verilog << "`define MEM_HAS_CHANNEL" << channel << " 1\n";
++  printVerilogAXI("MEM", memory);
++  verilog << "`endif // " << guard << '\n';
++  verilog.flush();
+   OpBuilder builder(circuit.getContext());
+   SmallVector<Attribute> annotations(raw.begin(), raw.end());
++  annotations.push_back(builder.getDictionaryAttr({
++      builder.getNamedAttr("class", builder.getStringAttr(AnnotationClasses::OutputFile)),
++      builder.getNamedAttr("fileSuffix", builder.getStringAttr(".const.vh")),
++      builder.getNamedAttr("body", builder.getStringAttr(verilogBody))}));
+   annotations.push_back(builder.getDictionaryAttr({
+       builder.getNamedAttr("class", builder.getStringAttr(AnnotationClasses::OutputFile)),
+       builder.getNamedAttr("fileSuffix", builder.getStringAttr(".const.h")),
+--- a/sim/goldengate-circt/test/Support/MetasimInterfaceHeaderTest.cpp
++++ b/sim/goldengate-circt/test/Support/MetasimInterfaceHeaderTest.cpp
+@@ -48,12 +48,15 @@
+   std::string error;
+   require(succeeded(goldengate::prepareMetasimInterfaceHeader(circuit, name, error)), error);
+   auto result = circuit->getAttrOfType<ArrayAttr>("rawAnnotations");
+-  require(result.size() == archive.size() + 1, "header annotation count");
++  require(result.size() == archive.size() + 2, "header annotation count");
+   for (unsigned i = 0; i < archive.size(); ++i)
+     require(archive[i] == result[i], "changed existing annotation");
+   unsigned i = 0;
+   for (auto module : circuit.getOps<FModuleLike>())
+     require(bodies[i++] == dump(module.getOperation()), "changed circuit semantics");
++  auto verilog = cast<DictionaryAttr>(result[result.size() - 2]);
++  require(verilog.getAs<StringAttr>("class").getValue() == goldengate::AnnotationClasses::OutputFile &&
++          verilog.getAs<StringAttr>("fileSuffix").getValue() == ".const.vh", "Verilog header output annotation");
+   auto output = cast<DictionaryAttr>(result[result.size() - 1]);
+   require(output.getAs<StringAttr>("class").getValue() == goldengate::AnnotationClasses::OutputFile &&
+           output.getAs<StringAttr>("fileSuffix").getValue() == ".const.h", "header output annotation");
+@@ -67,6 +70,18 @@
+     auto positive = fixture(context);
+     auto circuit = *positive->getOps<CircuitOp>().begin();
+     auto body = run(circuit, "Quoted\"\\\nTarget");
++    auto annotations = circuit->getAttrOfType<ArrayAttr>("rawAnnotations");
++    auto verilog = cast<DictionaryAttr>(annotations[annotations.size() - 2])
++                       .getAs<StringAttr>("body").getValue();
++    for (auto expected : {"`define CTRL_ID_BITS 3\n", "`define CTRL_ADDR_BITS 20\n",
++         "`define CTRL_DATA_BITS 64\n", "`define MEM_ID_BITS 5\n",
++         "`define MEM_ADDR_BITS 40\n", "`define MEM_DATA_BITS 128\n",
++         "`define CPU_MANAGED_AXI4_ID_BITS 7\n", "`define CPU_MANAGED_AXI4_ADDR_BITS 48\n",
++         "`define CPU_MANAGED_AXI4_DATA_BITS 256\n", "`define CPU_MANAGED_AXI4_PRESENT 1\n",
++         "`define QSFP_DATA_BITS 512\n", "`define MEM_HAS_CHANNEL0 1\n"})
++      require(verilog.contains(expected), "Verilog interface width or presence macro");
++    require(!verilog.contains("MEM_HAS_CHANNEL1") && !verilog.contains("FPGA_MANAGED_AXI4_PRESENT") &&
++            !verilog.contains("QSFP_HAS_CHANNEL"), "unexpected metasim endpoint macro");
+     for (auto expected : {".ctrl = AXI4Config{3, 20, 64}", ".mem = AXI4Config{5, 40, 128}",
+          ".cpu_managed = AXI4Config{7, 48, 256}", ".mem_num_channels = 1",
+          ".fpga_managed = std::nullopt", ".qsfp = FPGATopQSFPConfig{512, 0}",
+@@ -75,11 +90,21 @@
+     std::string error, before = dump(*positive);
+     require(failed(goldengate::prepareMetasimInterfaceHeader(circuit, "FireSim", error)) &&
+             dump(*positive) == before, "duplicate output changed IR");
+-    for (unsigned bad = 1; bad <= 6; ++bad) {
++    for (unsigned bad = 1; bad <= 7; ++bad) {
+       auto negative = fixture(context, bad);
+       auto c = *negative->getOps<CircuitOp>().begin();
+       if (bad == 4) c->removeAttr("rawAnnotations");
+       if (bad == 5) c.setNameAttr(StringAttr::get(&context, "OtherTop"));
++      if (bad == 7) {
++        OpBuilder builder(&context);
++        auto raw = c->getAttrOfType<ArrayAttr>("rawAnnotations");
++        SmallVector<Attribute> retained(raw.begin(), raw.end());
++        retained.push_back(builder.getDictionaryAttr({
++            builder.getNamedAttr("class", builder.getStringAttr(goldengate::AnnotationClasses::OutputFile)),
++            builder.getNamedAttr("fileSuffix", builder.getStringAttr(".const.vh")),
++            builder.getNamedAttr("body", builder.getStringAttr("existing\n"))}));
++        c->setAttr("rawAnnotations", builder.getArrayAttr(retained));
++      }
+       before = dump(*negative);
+       require(failed(goldengate::prepareMetasimInterfaceHeader(c, bad == 6 ? "" : "FireSim", error)) &&
+               dump(*negative) == before, "invalid input changed IR");
+--- a/sim/make/goldengate.mk
++++ b/sim/make/goldengate.mk
+@@ -6,6 +6,7 @@
+ 
+ # Simulation memory map emitted by the MIDAS compiler
+ header := $(GENERATED_DIR)/$(BASE_FILE_NAME).const.h
++verilog_header := $(GENERATED_DIR)/$(BASE_FILE_NAME).const.vh
+ 
+ # The midas-generated simulator RTL which will be baked into the FPGA shell project
+ simulator_verilog := $(GENERATED_DIR)/$(BASE_FILE_NAME).sv
+@@ -63,7 +64,7 @@
+ goldengate-circt-force:
+ 
+ # An existing SFC .sv must never make the CIRCT selection appear successful.
+-$(simulator_verilog) $(simulator_xdc) $(header) $(fame_annos) &: $(FIRRTL_FILE) $(ANNO_FILE) goldengate-circt-force
++$(simulator_verilog) $(simulator_xdc) $(header) $(verilog_header) $(fame_annos) &: $(FIRRTL_FILE) $(ANNO_FILE) goldengate-circt-force
+ 	cmake -S $(firesim_base_dir)/goldengate-circt -B $(goldengate_circt_build) -G Ninja \
+ 		-DCIRCT_DIR=$(GOLDENGATE_CIRCT_PREFIX)/lib/cmake/circt \
+ 		-DZLIB_ROOT=$(abspath $(GOLDENGATE_CIRCT_PREFIX)/..)
+@@ -87,12 +88,13 @@
+ 	cp $(GENERATED_DIR)/circt-ingestion/$(BASE_FILE_NAME).implementation.xdc $(GENERATED_DIR)/$(BASE_FILE_NAME).implementation.xdc
+ 	cp $(GENERATED_DIR)/circt-ingestion/$(BASE_FILE_NAME).defines.vh $(GENERATED_DIR)/$(BASE_FILE_NAME).defines.vh
+ 	cp $(GENERATED_DIR)/circt-ingestion/$(BASE_FILE_NAME).const.h $(header)
++	cp $(GENERATED_DIR)/circt-ingestion/$(BASE_FILE_NAME).const.vh $(verilog_header)
+ 	@for collateral in $(GENERATED_DIR)/circt-ingestion/$(BASE_FILE_NAME).*.ipgen.tcl; do \
+ 		if test -f "$$collateral"; then cp "$$collateral" $(GENERATED_DIR)/; fi; \
+ 	done
+ 	cp $(GENERATED_DIR)/circt-ingestion/post-bridge-extraction-all.json $(fame_annos)
+ else ifeq ($(GOLDENGATE_COMPILER),sfc)
+-$(simulator_verilog) $(simulator_xdc) $(header) $(fame_annos) &: $(FIRRTL_FILE) $(ANNO_FILE) $(FIRESIM_MAIN_CP)
++$(simulator_verilog) $(simulator_xdc) $(header) $(verilog_header) $(fame_annos) &: $(FIRRTL_FILE) $(ANNO_FILE) $(FIRESIM_MAIN_CP)
+ 	$(call run_jar_scala_main,$(firesim_base_dir),$(FIRESIM_MAIN_CP),midas.stage.GoldenGateMain,\
+ 		-i $(FIRRTL_FILE) \
+ 		-td $(GENERATED_DIR) \
+--- a/sim/make/verilator.mk
++++ b/sim/make/verilator.mk
+@@ -13,7 +13,7 @@
+ $(verilator) $(verilator_debug): export CXXFLAGS := $(CXXFLAGS) $(common_cxx_flags) $(VERILATOR_CXXOPTS) -D RTLSIM
+ $(verilator) $(verilator_debug): export LDFLAGS := $(LDFLAGS) $(common_ld_flags) -Wl,-rpath='$$$$ORIGIN'
+ 
+-verilator_driver_deps := $(header) $(DRIVER_CC) $(DRIVER_H) $(midas_cc) $(midas_h) $(simulator_verilog)
++verilator_driver_deps := $(header) $(verilog_header) $(DRIVER_CC) $(DRIVER_H) $(midas_cc) $(midas_h) $(simulator_verilog)
+ 
+ define make_verilator
+         $(MAKE) -C $(simif_dir) $(VERILATOR_MAKEFLAGS) $(1) \

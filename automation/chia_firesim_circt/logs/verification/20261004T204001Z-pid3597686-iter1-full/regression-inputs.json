@@ -1,0 +1,65 @@
+{
+  "version": "dd46705e46bd4a0589c3b55b22450f3a85863d0091d8be49bc6a1dc7e231af9a",
+  "archive": "/scratch/jfx/fsim-circt/automation/chia_firesim_circt/logs/regression-versions/dd46705e46bd4a0589c3b55b22450f3a85863d0091d8be49bc6a1dc7e231af9a",
+  "binaries": {
+    "circt-fame-suite": {
+      "sha256": "cbe9167abf7518fd522f23946edc5911353e4b5ba6d367626d842a0c87aaac47",
+      "bytes": 289744
+    },
+    "circt-fame-rocket-suite": {
+      "sha256": "f1d92c2748fa54ce280db716ac78a8195202ff781e1a3ce48692af347071a038",
+      "bytes": 294016
+    },
+    "circt-fame-integer": {
+      "sha256": "abd08df7b9621bc095e3b9b640248b4bd34565459343bf48eb42dd58b1852c91",
+      "bytes": 63456
+    },
+    "circt-fame-memory": {
+      "sha256": "8a9ba25ddec13fc97e7cea9596e402becdc1ab478c694a9bf147b60a5f755856",
+      "bytes": 190920
+    },
+    "circt-fame-control": {
+      "sha256": "0fcaa4a36409c34524eec6d53916353fe20a2dcb569edb754f089bb610c373da",
+      "bytes": 54832
+    },
+    "circt-fame-atomics": {
+      "sha256": "ef96b3d410f55794a70a0843ab38e9f235015546cf2a4cf5dc3d7d655098340a",
+      "bytes": 58560
+    },
+    "circt-fame-csr": {
+      "sha256": "f552ce519b5d17b3dbe7daa2044ae6ef2426c0c00d0ebed5cd5de8713bc6f978",
+      "bytes": 52728
+    },
+    "circt-fame-traps": {
+      "sha256": "52a3485649ad58662c8939745984b51089f666aa589efaf8db9d03247cab3619",
+      "bytes": 48768
+    },
+    "circt-fame-vm": {
+      "sha256": "900a14ac186574326e4c7f5effecbc926b386de4a1e690c7b0e6fc85e9e8a276",
+      "bytes": 80192
+    },
+    "circt-fame-interrupts": {
+      "sha256": "1af58e52f40afc65fced0a7198a1aac3b56b543444e1898fe00bbcb3b701b364",
+      "bytes": 48432
+    },
+    "circt-fame-fp": {
+      "sha256": "31f5ea6b965f8da3771dd9694e94765754255f748f39d7808fef65c2c842b8ea",
+      "bytes": 55552
+    },
+    "circt-fame-icache": {
+      "sha256": "1b9daf69b3ffc89626ba1eac5b54a85dba1c3b243983d1195a765665b225e36f",
+      "bytes": 49688
+    },
+    "circt-fame-workloads": {
+      "sha256": "e5733aaa3a4bcd29aff2ac54f107cfd56a1b7a31afb6e97506fddfdb20ec8fd9",
+      "bytes": 66424
+    },
+    "circt-fame-uart": {
+      "sha256": "de9c09aa98d7c7e5207ce13a4626cd65ceed5e476785916bc162ddf446a85bb0",
+      "bytes": 52968
+    }
+  },
+  "portable_reference": "/scratch/jfx/fsim-circt/automation/chia_firesim_circt/logs/regression-versions/dd46705e46bd4a0589c3b55b22450f3a85863d0091d8be49bc6a1dc7e231af9a/spike-results/expected-results.json",
+  "initial_standalones_required": true,
+  "rocket_differential": "pending SFC UART-bearing baseline"
+}

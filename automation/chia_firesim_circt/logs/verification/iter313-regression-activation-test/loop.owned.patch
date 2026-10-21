@@ -1,0 +1,35 @@
+--- loop.before.py
++++ loop.py
+@@ -14,6 +14,7 @@
+ import json
+ import os
+ import re
++import runpy
+ import selectors
+ import shlex
+ import subprocess
+@@ -480,7 +481,23 @@
+     # An advisory lock serializes cooperating Chia verification workers.
+     with (AUTOMATION / ".verification.lock").open("a") as lock:
+         fcntl.flock(lock, fcntl.LOCK_EX)
+-        return _verify_with_firesim(mode, run_id, run_hardware_gate)
++        # Chia serializes this function from the long-lived driver. Read the
++        # verification implementation afresh on each dispatch so later edits
++        # take effect without replacing the running driver or Ray worker.
++        # run_path compiles the .py source and does not use a cached .pyc.
++        source = AUTOMATION / "loop.py"
++        source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
++        implementation = runpy.run_path(str(source), run_name="firesim_verification")
++        if hashlib.sha256(source.read_bytes()).hexdigest() != source_hash:
++            raise RuntimeError("Verification source changed while loading; retry dispatch")
++        results = implementation["_verify_with_firesim"](mode, run_id, run_hardware_gate)
++        if mode != "none":
++            results.insert(0, asdict(CommandResult(
++                "verification_source", 0,
++                f"Loaded current verification source: {source}\n"
++                f"sha256={source_hash}", "",
++            )))
++        return results
+ 
+ 
+ def _verify_with_firesim(

@@ -1,0 +1,6 @@
+{
+  "name": "circt-metasim-bare",
+  "base": "bare-base.json",
+  "host-init": "build.sh",
+  "bin": "circt-metasim-bare"
+}

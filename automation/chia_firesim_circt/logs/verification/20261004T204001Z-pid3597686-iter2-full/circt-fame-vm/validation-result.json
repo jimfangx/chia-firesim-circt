@@ -1,0 +1,24 @@
+{
+  "binary": "circt-fame-vm",
+  "suffix_tag": "20261004T204001Z-pid3597686-iter2-full-circt-fame-vm",
+  "reference": "/scratch/jfx/fsim-circt/automation/chia_firesim_circt/logs/regression-versions/6ece78ef718f4f735d61ecd788a563c8a794133049dc2a08931e910c0427afaf/spike-results/expected-results.json",
+  "differential": "portable Spike",
+  "failed_groups": [],
+  "uartlog": "/scratch/jfx/fsim-circt/sims/firesim/deploy/results-workload/2026-10-04--22-44-39-circt-fame-vm-20261004T204001Z-pid3597686-iter2-full-circt-fame-vm/circt-fame-vm0/uartlog",
+  "result_directory": "/scratch/jfx/fsim-circt/sims/firesim/deploy/results-workload/2026-10-04--22-44-39-circt-fame-vm-20261004T204001Z-pid3597686-iter2-full-circt-fame-vm",
+  "elf_sha256": "900a14ac186574326e4c7f5effecbc926b386de4a1e690c7b0e6fc85e9e8a276",
+  "reference_sha256": "6dea6d5764012d95f79072492c9f149f1b9318ffa80537c7043e793f8dba3816",
+  "result": {
+    "mask": 64,
+    "checks": 1035,
+    "signature": "0x3fa2005140ad009a",
+    "tests": [
+      {
+        "name": "vm",
+        "checks": 1035,
+        "signature": "0x8bef25aeb180f38a"
+      }
+    ]
+  },
+  "returncode": 0
+}

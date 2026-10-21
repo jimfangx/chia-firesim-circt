@@ -1,0 +1,24 @@
+{
+  "binary": "circt-fame-workloads",
+  "suffix_tag": "20261004T204001Z-pid3597686-iter2-full-circt-fame-workloads",
+  "reference": "/scratch/jfx/fsim-circt/automation/chia_firesim_circt/logs/regression-versions/6ece78ef718f4f735d61ecd788a563c8a794133049dc2a08931e910c0427afaf/spike-results/expected-results.json",
+  "differential": "portable Spike",
+  "failed_groups": [],
+  "uartlog": "/scratch/jfx/fsim-circt/sims/firesim/deploy/results-workload/2026-10-04--23-04-19-circt-fame-workloads-20261004T204001Z-pid3597686-iter2-full-circt-fame-workloads/circt-fame-workloads0/uartlog",
+  "result_directory": "/scratch/jfx/fsim-circt/sims/firesim/deploy/results-workload/2026-10-04--23-04-19-circt-fame-workloads-20261004T204001Z-pid3597686-iter2-full-circt-fame-workloads",
+  "elf_sha256": "e5733aaa3a4bcd29aff2ac54f107cfd56a1b7a31afb6e97506fddfdb20ec8fd9",
+  "reference_sha256": "6dea6d5764012d95f79072492c9f149f1b9318ffa80537c7043e793f8dba3816",
+  "result": {
+    "mask": 1024,
+    "checks": 8730,
+    "signature": "0x475a923854b2340b",
+    "tests": [
+      {
+        "name": "workloads",
+        "checks": 8730,
+        "signature": "0xa82cc78695c2c95f"
+      }
+    ]
+  },
+  "returncode": 0
+}

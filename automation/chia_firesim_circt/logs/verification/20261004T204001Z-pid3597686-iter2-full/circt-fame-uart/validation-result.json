@@ -1,0 +1,23 @@
+{
+  "binary": "circt-fame-uart",
+  "suffix_tag": "20261004T204001Z-pid3597686-iter2-full-circt-fame-uart",
+  "reference": null,
+  "differential": "pending SFC UART-bearing baseline",
+  "failed_groups": [],
+  "uartlog": "/scratch/jfx/fsim-circt/sims/firesim/deploy/results-workload/2026-10-04--23-09-33-circt-fame-uart-20261004T204001Z-pid3597686-iter2-full-circt-fame-uart/circt-fame-uart0/uartlog",
+  "result_directory": "/scratch/jfx/fsim-circt/sims/firesim/deploy/results-workload/2026-10-04--23-09-33-circt-fame-uart-20261004T204001Z-pid3597686-iter2-full-circt-fame-uart",
+  "elf_sha256": "de9c09aa98d7c7e5207ce13a4626cd65ceed5e476785916bc162ddf446a85bb0",
+  "result": {
+    "mask": 2048,
+    "checks": 664,
+    "signature": "0x2d93a55c9ea03286",
+    "tests": [
+      {
+        "name": "uart",
+        "checks": 664,
+        "signature": "0xc89c0ca1a567dc96"
+      }
+    ]
+  },
+  "returncode": 0
+}

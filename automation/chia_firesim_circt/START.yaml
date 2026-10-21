@@ -42,12 +42,22 @@ preflight:
 
 autonomous_full_loop:
   description: >-
-    One bounded autonomous task. Each iteration asks Codex for one incremental
-    porting step, then runs replacertl compile, Verilator metasimulation, and
-    the U250 build/boot gate in that order. A failed gate is supplied to the
-    next iteration. A full pass continues porting until Codex explicitly emits
-    LOOP_COMPLETE: yes; the FireMarshal poweroff workload cleanly powers down
-    Buildroot, then run-farm termination runs before the next iteration.
+    One bounded autonomous task. Codex focuses on the core Golden Gate
+    compiler under sims/firesim/sim, using the Scala SFC implementation as the
+    oracle and FIRESIM_CIRCT_PORT_PLAN.md as its milestone order. Automation,
+    FireMarshal, workloads, Python helpers, runtime YAML, and Ray/Chia plumbing
+    are strongly discouraged unless minimally required to unblock a core change
+    or golden comparison; they never count as porting work on their own. Each
+    core change compares its candidate output with the relevant recorded SFC
+    golden artifact. Each iteration then runs replacertl
+    compile, a bounded bare-metal Verilator
+    metasimulation (volatile-memory checksum, UART PASS marker, tohost exit),
+    and enables FireSim tracing. The U250 Linux build/boot gate runs only after
+    15 consecutive bare-metal passes; any bare or hardware failure resets the
+    streak. A failed gate is supplied to the next iteration. A full pass
+    continues porting until Codex explicitly emits LOOP_COMPLETE: yes after a
+    scheduled hardware pass; the FireMarshal poweroff workload cleanly powers
+    down Buildroot, then run-farm termination runs before the next iteration.
   command: |
     chia job submit -- \
       python /scratch/jfx/fsim-circt/automation/chia_firesim_circt/loop.py --iterations 12 --verify full
@@ -55,6 +65,25 @@ autonomous_full_loop:
     chia job submit -- \
       python /scratch/jfx/fsim-circt/automation/chia_firesim_circt/loop.py --iterations 12 --verify full --model <model-name>
 
+baremetal_metasim:
+  description: >-
+    Faster functional compiler gate: compile transformed RTL, run the small
+    bare-metal checksum program under Verilator, require its UART PASS marker,
+    and terminate the metasim run farm. It does not build a U250 bitstream or
+    boot Linux.
+  command: |
+    chia job submit -- \
+      python /scratch/jfx/fsim-circt/automation/chia_firesim_circt/loop.py --iterations 1 --verify metasim
+
+stop_previous_job:
+  description: >-
+    Stop a previous loop before replacing it. Stopping preserves source edits
+    in the shared checkout and retains logs. Deleting is optional and removes
+    only stopped-job Ray metadata.
+  commands: |
+    chia job list
+    chia job stop <job-id>
+    chia job delete <job-id>  # optional, after it has stopped
 
 stop_cluster:
   command: chia down automation/chia_firesim_circt/cluster.yaml

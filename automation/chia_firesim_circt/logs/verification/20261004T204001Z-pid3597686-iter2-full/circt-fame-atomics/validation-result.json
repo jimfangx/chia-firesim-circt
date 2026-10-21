@@ -1,0 +1,24 @@
+{
+  "binary": "circt-fame-atomics",
+  "suffix_tag": "20261004T204001Z-pid3597686-iter2-full-circt-fame-atomics",
+  "reference": "/scratch/jfx/fsim-circt/automation/chia_firesim_circt/logs/regression-versions/6ece78ef718f4f735d61ecd788a563c8a794133049dc2a08931e910c0427afaf/spike-results/expected-results.json",
+  "differential": "portable Spike",
+  "failed_groups": [],
+  "uartlog": "/scratch/jfx/fsim-circt/sims/firesim/deploy/results-workload/2026-10-04--22-29-51-circt-fame-atomics-20261004T204001Z-pid3597686-iter2-full-circt-fame-atomics/circt-fame-atomics0/uartlog",
+  "result_directory": "/scratch/jfx/fsim-circt/sims/firesim/deploy/results-workload/2026-10-04--22-29-51-circt-fame-atomics-20261004T204001Z-pid3597686-iter2-full-circt-fame-atomics",
+  "elf_sha256": "ef96b3d410f55794a70a0843ab38e9f235015546cf2a4cf5dc3d7d655098340a",
+  "reference_sha256": "6dea6d5764012d95f79072492c9f149f1b9318ffa80537c7043e793f8dba3816",
+  "result": {
+    "mask": 8,
+    "checks": 3556,
+    "signature": "0xf0189f129235d863",
+    "tests": [
+      {
+        "name": "atomics",
+        "checks": 3556,
+        "signature": "0x9450eeaf44a34f42"
+      }
+    ]
+  },
+  "returncode": 0
+}

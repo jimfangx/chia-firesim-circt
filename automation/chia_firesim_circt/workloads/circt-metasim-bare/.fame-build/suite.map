@@ -1,0 +1,728 @@
+
+Merging object attributes
+
+
+Discarded input sections
+
+ .text          0x0000000000000000        0x0 .fame-build/runner-suite.o
+ .data          0x0000000000000000        0x0 .fame-build/runner-suite.o
+ .bss           0x0000000000000000        0x0 .fame-build/runner-suite.o
+ .text          0x0000000000000000        0x0 .fame-build/test_integer.o
+ .data          0x0000000000000000        0x0 .fame-build/test_integer.o
+ .bss           0x0000000000000000        0x0 .fame-build/test_integer.o
+ .text          0x0000000000000000        0x0 .fame-build/test_memory.o
+ .data          0x0000000000000000        0x0 .fame-build/test_memory.o
+ .bss           0x0000000000000000        0x0 .fame-build/test_memory.o
+ .text          0x0000000000000000        0x0 .fame-build/test_control.o
+ .data          0x0000000000000000        0x0 .fame-build/test_control.o
+ .bss           0x0000000000000000        0x0 .fame-build/test_control.o
+ .text          0x0000000000000000        0x0 .fame-build/test_atomics.o
+ .data          0x0000000000000000        0x0 .fame-build/test_atomics.o
+ .bss           0x0000000000000000        0x0 .fame-build/test_atomics.o
+ .text          0x0000000000000000        0x0 .fame-build/test_csr.o
+ .data          0x0000000000000000        0x0 .fame-build/test_csr.o
+ .bss           0x0000000000000000        0x0 .fame-build/test_csr.o
+ .text          0x0000000000000000        0x0 .fame-build/test_traps.o
+ .data          0x0000000000000000        0x0 .fame-build/test_traps.o
+ .bss           0x0000000000000000        0x0 .fame-build/test_traps.o
+ .text          0x0000000000000000        0x0 .fame-build/test_vm.o
+ .data          0x0000000000000000        0x0 .fame-build/test_vm.o
+ .bss           0x0000000000000000        0x0 .fame-build/test_vm.o
+ .text          0x0000000000000000        0x0 .fame-build/test_interrupts.o
+ .data          0x0000000000000000        0x0 .fame-build/test_interrupts.o
+ .bss           0x0000000000000000        0x0 .fame-build/test_interrupts.o
+ .text          0x0000000000000000        0x0 .fame-build/test_fp.o
+ .data          0x0000000000000000        0x0 .fame-build/test_fp.o
+ .bss           0x0000000000000000        0x0 .fame-build/test_fp.o
+ .text          0x0000000000000000        0x0 .fame-build/test_icache.o
+ .data          0x0000000000000000        0x0 .fame-build/test_icache.o
+ .bss           0x0000000000000000        0x0 .fame-build/test_icache.o
+ .text          0x0000000000000000        0x0 .fame-build/test_workloads.o
+ .data          0x0000000000000000        0x0 .fame-build/test_workloads.o
+ .bss           0x0000000000000000        0x0 .fame-build/test_workloads.o
+ .text          0x0000000000000000        0x0 .fame-build/test_uart.o
+ .data          0x0000000000000000        0x0 .fame-build/test_uart.o
+ .bss           0x0000000000000000        0x0 .fame-build/test_uart.o
+ .rodata.fame_uart.str1.8
+                0x0000000000000000       0x85 .fame-build/test_uart.o
+ .text.fame_uart
+                0x0000000000000000      0x1ec .fame-build/test_uart.o
+ .rodata.end.0  0x0000000000000000       0x10 .fame-build/test_uart.o
+ .rodata.alphabet.1
+                0x0000000000000000       0x40 .fame-build/test_uart.o
+ .rodata.prefix.2
+                0x0000000000000000       0x11 .fame-build/test_uart.o
+ .debug_info    0x0000000000000000      0x45e .fame-build/test_uart.o
+ .debug_abbrev  0x0000000000000000      0x1bf .fame-build/test_uart.o
+ .debug_loclists
+                0x0000000000000000      0x2d3 .fame-build/test_uart.o
+ .debug_aranges
+                0x0000000000000000       0x30 .fame-build/test_uart.o
+ .debug_rnglists
+                0x0000000000000000       0xfd .fame-build/test_uart.o
+ .debug_line    0x0000000000000000      0x528 .fame-build/test_uart.o
+ .debug_str     0x0000000000000000      0x1d4 .fame-build/test_uart.o
+ .debug_line_str
+                0x0000000000000000       0xd2 .fame-build/test_uart.o
+ .comment       0x0000000000000000       0x1a .fame-build/test_uart.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 .fame-build/test_uart.o
+ .debug_frame   0x0000000000000000       0x58 .fame-build/test_uart.o
+ .riscv.attributes
+                0x0000000000000000       0x78 .fame-build/test_uart.o
+ .text          0x0000000000000000        0x0 .fame-build/crt.o
+ .data          0x0000000000000000        0x0 .fame-build/crt.o
+ .bss           0x0000000000000000        0x0 .fame-build/crt.o
+ .data          0x0000000000000000        0x0 .fame-build/syscalls.o
+ .text.startup  0x0000000000000000       0x1c .fame-build/syscalls.o
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x0000000000000000 0xffffffffffffffff
+
+Linker script and memory map
+
+LOAD .fame-build/runner-suite.o
+LOAD .fame-build/test_integer.o
+LOAD .fame-build/test_memory.o
+LOAD .fame-build/test_control.o
+LOAD .fame-build/test_atomics.o
+LOAD .fame-build/test_csr.o
+LOAD .fame-build/test_traps.o
+LOAD .fame-build/test_vm.o
+LOAD .fame-build/test_interrupts.o
+LOAD .fame-build/test_fp.o
+LOAD .fame-build/test_icache.o
+LOAD .fame-build/test_workloads.o
+LOAD .fame-build/test_uart.o
+LOAD .fame-build/crt.o
+LOAD .fame-build/syscalls.o
+LOAD /scratch/jfx/fsim-circt/.conda-env/riscv-tools/bin/../lib/gcc/riscv64-unknown-elf/16.1.0/rv64imafdc/lp64d/libgcc.a
+                0x0000000080000000                . = 0x80000000
+
+.text.init      0x0000000080000000      0x1c6
+ *(.text.init)
+ .text.init     0x0000000080000000      0x1c6 .fame-build/crt.o
+                0x0000000080000000                _start
+
+.tohost         0x0000000080001000       0x48
+ *(.tohost)
+ .tohost        0x0000000080001000       0x48 .fame-build/crt.o
+                0x0000000080001000                tohost
+                0x0000000080001040                fromhost
+
+.text           0x0000000080001048     0x2c5c
+ *(.text .text.*)
+ .text.fame_mix
+                0x0000000080001048       0x44 .fame-build/runner-suite.o
+                0x0000000080001048                fame_mix
+ .text.fame_sext32
+                0x000000008000108c       0x14 .fame-build/runner-suite.o
+                0x000000008000108c                fame_sext32
+ .text.fame_check
+                0x00000000800010a0       0x96 .fame-build/runner-suite.o
+                0x00000000800010a0                fame_check
+ .text.startup.main
+                0x0000000080001136      0x176 .fame-build/runner-suite.o
+                0x0000000080001136                main
+ .text.multiply
+                0x00000000800012ac       0x3e .fame-build/test_integer.o
+ .text.divide   0x00000000800012ea       0x4a .fame-build/test_integer.o
+ .text.pair     0x0000000080001334      0x3b8 .fame-build/test_integer.o
+ .text.fame_integer
+                0x00000000800016ec       0x92 .fame-build/test_integer.o
+                0x00000000800016ec                fame_integer
+ .text.fame_memory
+                0x000000008000177e      0x408 .fame-build/test_memory.o
+                0x000000008000177e                fame_memory
+ .text.f0       0x0000000080001b86        0x4 .fame-build/test_control.o
+ .text.f1       0x0000000080001b8a        0xe .fame-build/test_control.o
+ .text.f2       0x0000000080001b98        0xa .fame-build/test_control.o
+ .text.f3       0x0000000080001ba2        0xa .fame-build/test_control.o
+ .text.fibonacci
+                0x0000000080001bac       0x64 .fame-build/test_control.o
+ .text.fame_control
+                0x0000000080001c10      0x1d4 .fame-build/test_control.o
+                0x0000000080001c10                fame_control
+ .text.swap64   0x0000000080001de4        0xe .fame-build/test_atomics.o
+ .text.swap32   0x0000000080001df2       0x14 .fame-build/test_atomics.o
+ .text.add64    0x0000000080001e06        0xe .fame-build/test_atomics.o
+ .text.add32    0x0000000080001e14       0x14 .fame-build/test_atomics.o
+ .text.bitxor64
+                0x0000000080001e28        0xe .fame-build/test_atomics.o
+ .text.bitxor32
+                0x0000000080001e36       0x14 .fame-build/test_atomics.o
+ .text.bitand64
+                0x0000000080001e4a        0xe .fame-build/test_atomics.o
+ .text.bitand32
+                0x0000000080001e58       0x14 .fame-build/test_atomics.o
+ .text.bitor64  0x0000000080001e6c        0xe .fame-build/test_atomics.o
+ .text.bitor32  0x0000000080001e7a       0x14 .fame-build/test_atomics.o
+ .text.mins64   0x0000000080001e8e        0xe .fame-build/test_atomics.o
+ .text.mins32   0x0000000080001e9c       0x14 .fame-build/test_atomics.o
+ .text.maxs64   0x0000000080001eb0        0xe .fame-build/test_atomics.o
+ .text.maxs32   0x0000000080001ebe       0x14 .fame-build/test_atomics.o
+ .text.minu64   0x0000000080001ed2        0xe .fame-build/test_atomics.o
+ .text.minu32   0x0000000080001ee0       0x14 .fame-build/test_atomics.o
+ .text.maxu64   0x0000000080001ef4        0xe .fame-build/test_atomics.o
+ .text.maxu32   0x0000000080001f02       0x14 .fame-build/test_atomics.o
+ .text.expected
+                0x0000000080001f16       0x6c .fame-build/test_atomics.o
+ .text.fame_atomics
+                0x0000000080001f82      0x212 .fame-build/test_atomics.o
+                0x0000000080001f82                fame_atomics
+ .text.fame_csr
+                0x0000000080002194      0x208 .fame-build/test_csr.o
+                0x0000000080002194                fame_csr
+ .text.fame_arm_trap
+                0x000000008000239c       0x2c .fame-build/test_traps.o
+                0x000000008000239c                fame_arm_trap
+ .text.fame_finish_trap
+                0x00000000800023c8       0x2c .fame-build/test_traps.o
+                0x00000000800023c8                fame_finish_trap
+ .text.handle_trap
+                0x00000000800023f4       0xda .fame-build/test_traps.o
+                0x00000000800023f4                handle_trap
+ .text.fame_traps
+                0x00000000800024ce      0x19c .fame-build/test_traps.o
+                0x00000000800024ce                fame_traps
+ .text.fame_vm  0x000000008000266a      0x2f6 .fame-build/test_vm.o
+                0x000000008000266a                fame_vm
+ .text.fame_interrupt_dispatch
+                0x0000000080002960       0x6c .fame-build/test_interrupts.o
+                0x0000000080002960                fame_interrupt_dispatch
+ .text.fame_interrupts
+                0x00000000800029cc      0x15a .fame-build/test_interrupts.o
+                0x00000000800029cc                fame_interrupts
+ .text.fame_fp  0x0000000080002b26      0x4a0 .fame-build/test_fp.o
+                0x0000000080002b26                fame_fp
+ .text.fame_icache
+                0x0000000080002fc6       0x9c .fame-build/test_icache.o
+                0x0000000080002fc6                fame_icache
+ .text.fame_workloads
+                0x0000000080003062      0x4fa .fame-build/test_workloads.o
+                0x0000000080003062                fame_workloads
+ .text          0x000000008000355c      0x748 .fame-build/syscalls.o
+                0x000000008000381a                putchar
+                0x0000000080003890                setStats
+                0x00000000800038ce                tohost_exit
+                0x00000000800038f0                exit
+                0x00000000800038f8                abort
+                0x0000000080003906                printstr
+                0x000000008000395a                thread_entry
+                0x0000000080003960                printhex
+                0x000000008000399c                printf
+                0x00000000800039ce                sprintf
+                0x0000000080003a0e                memcpy
+                0x0000000080003a4e                _init
+                0x0000000080003b28                memset
+                0x0000000080003b6e                strlen
+                0x0000000080003b88                strnlen
+                0x0000000080003ba8                strcmp
+                0x0000000080003bca                strcpy
+                0x0000000080003bdc                atol
+                0x0000000080003c40                srandom
+                0x0000000080003c54                random
+                0x0000000080003c78                time
+
+.rodata         0x0000000080003ca8     0x11a8
+ *(.rodata .rodata.*)
+ .rodata.fame_check.str1.8
+                0x0000000080003ca8      0xc21 .fame-build/runner-suite.o
+                                         0x31 (size before relaxing)
+ .rodata.main.str1.8
+                0x00000000800048c9        0x0 .fame-build/runner-suite.o
+                                         0xc4 (size before relaxing)
+ .rodata.str1.8
+                0x00000000800048c9        0x0 .fame-build/runner-suite.o
+                                         0x62 (size before relaxing)
+ *fill*         0x00000000800048c9        0x7 
+ .rodata.tests.0
+                0x00000000800048d0       0xb0 .fame-build/runner-suite.o
+ .rodata.pair.str1.8
+                0x0000000080004980        0x0 .fame-build/test_integer.o
+                                         0xdc (size before relaxing)
+ .rodata.fame_integer.str1.8
+                0x0000000080004980        0x0 .fame-build/test_integer.o
+                                         0x10 (size before relaxing)
+ .rodata.edge.0
+                0x0000000080004980       0xa0 .fame-build/test_integer.o
+ .rodata.fame_memory.str1.8
+                0x0000000080004a20        0x0 .fame-build/test_memory.o
+                                        0x130 (size before relaxing)
+ .rodata.fibonacci.str1.8
+                0x0000000080004a20        0x0 .fame-build/test_control.o
+                                         0x16 (size before relaxing)
+ .rodata.fame_control.str1.8
+                0x0000000080004a20        0x0 .fame-build/test_control.o
+                                         0x82 (size before relaxing)
+ .rodata.v.0    0x0000000080004a20       0x38 .fame-build/test_control.o
+ .rodata.expected
+                0x0000000080004a58       0x20 .fame-build/test_atomics.o
+ .rodata.fame_atomics.str1.8
+                0x0000000080004a78        0x0 .fame-build/test_atomics.o
+                                         0xdb (size before relaxing)
+ .rodata.ops32.0
+                0x0000000080004a78       0x48 .fame-build/test_atomics.o
+ .rodata.ops64.1
+                0x0000000080004ac0       0x48 .fame-build/test_atomics.o
+ .rodata.values.2
+                0x0000000080004b08       0x38 .fame-build/test_atomics.o
+ .rodata.fame_csr.str1.8
+                0x0000000080004b40        0x0 .fame-build/test_csr.o
+                                        0x18d (size before relaxing)
+ .rodata.values.0
+                0x0000000080004b40       0x20 .fame-build/test_csr.o
+ .rodata.fame_finish_trap.str1.8
+                0x0000000080004b60        0x0 .fame-build/test_traps.o
+                                         0x18 (size before relaxing)
+ .rodata.handle_trap.str1.8
+                0x0000000080004b60        0x0 .fame-build/test_traps.o
+                                         0xa4 (size before relaxing)
+ .rodata.fame_traps.str1.8
+                0x0000000080004b60        0x0 .fame-build/test_traps.o
+                                         0x29 (size before relaxing)
+ .rodata.fame_vm.str1.8
+                0x0000000080004b60        0x0 .fame-build/test_vm.o
+                                         0x99 (size before relaxing)
+ .rodata.fame_interrupts.str1.8
+                0x0000000080004b60        0x0 .fame-build/test_interrupts.o
+                                         0x36 (size before relaxing)
+ .rodata.fame_fp.str1.8
+                0x0000000080004b60        0x0 .fame-build/test_fp.o
+                                        0x235 (size before relaxing)
+ .rodata.fame_icache.str1.8
+                0x0000000080004b60        0x0 .fame-build/test_icache.o
+                                         0x5e (size before relaxing)
+ .rodata.fame_workloads.str1.8
+                0x0000000080004b60        0x0 .fame-build/test_workloads.o
+                                         0x9b (size before relaxing)
+ .rodata.initial.0
+                0x0000000080004b60       0x20 .fame-build/test_workloads.o
+ .rodata.str1.8
+                0x0000000080004b80        0x0 .fame-build/test_workloads.o
+                                         0x49 (size before relaxing)
+ .rodata.vectors.1
+                0x0000000080004b80       0x78 .fame-build/test_workloads.o
+ .rodata.constants
+                0x0000000080004bf8      0x100 .fame-build/test_workloads.o
+ .rodata.str1.8
+                0x0000000080004cf8        0x0 .fame-build/syscalls.o
+                                         0x41 (size before relaxing)
+ .rodata        0x0000000080004cf8      0x158 .fame-build/syscalls.o
+
+.data           0x0000000080004e80       0x50
+ *(.data .data.*)
+ .data.functions
+                0x0000000080004e80       0x20 .fame-build/test_control.o
+ *(.got .got.*)
+ .got           0x0000000080004ea0       0x20 .fame-build/runner-suite.o
+                0x0000000080004ea0                _GLOBAL_OFFSET_TABLE_
+ .got.plt       0x0000000080004ec0       0x10 .fame-build/runner-suite.o
+
+.sdata          0x0000000080004ed0       0x28
+                0x00000000800056d0                __global_pointer$ = (. + 0x800)
+ *(.srodata .srodata.*)
+ .srodata.cst8  0x0000000080004ed0       0x28 .fame-build/runner-suite.o
+                                          0x8 (size before relaxing)
+ .srodata.cst8  0x0000000080004ef8        0x0 .fame-build/test_memory.o
+                                          0x8 (size before relaxing)
+ .srodata.cst8  0x0000000080004ef8        0x0 .fame-build/test_fp.o
+                                         0x18 (size before relaxing)
+ *(.sdata .sdata.*)
+
+.rela.dyn       0x0000000080004ef8        0x0
+ .rela.text.init
+                0x0000000080004ef8        0x0 .fame-build/runner-suite.o
+ .rela.got      0x0000000080004ef8        0x0 .fame-build/runner-suite.o
+ .rela.text     0x0000000080004ef8        0x0 .fame-build/runner-suite.o
+
+.sbss           0x0000000080004f00      0x100
+ *(.sbss .sbss.*)
+ .sbss.signature
+                0x0000000080004f00        0x8 .fame-build/runner-suite.o
+ .sbss.failures
+                0x0000000080004f08        0x8 .fame-build/runner-suite.o
+ .sbss.checks   0x0000000080004f10        0x8 .fame-build/runner-suite.o
+ *fill*         0x0000000080004f18       0x28 
+ .sbss.lane     0x0000000080004f40        0x8 .fame-build/test_memory.o
+ *fill*         0x0000000080004f48       0x38 
+ .sbss.atomic32
+                0x0000000080004f80        0x4 .fame-build/test_atomics.o
+ *fill*         0x0000000080004f84       0x3c 
+ .sbss.atomic64
+                0x0000000080004fc0        0x8 .fame-build/test_atomics.o
+ .sbss.expected_tval
+                0x0000000080004fc8        0x8 .fame-build/test_traps.o
+ .sbss.expected_cause
+                0x0000000080004fd0        0x8 .fame-build/test_traps.o
+ .sbss.check_registers
+                0x0000000080004fd8        0x4 .fame-build/test_traps.o
+ .sbss.check_value
+                0x0000000080004fdc        0x4 .fame-build/test_traps.o
+ .sbss.trap_bytes
+                0x0000000080004fe0        0x4 .fame-build/test_traps.o
+ .sbss.armed    0x0000000080004fe4        0x4 .fame-build/test_traps.o
+ .sbss.timer_count
+                0x0000000080004fe8        0x4 .fame-build/test_interrupts.o
+ .sbss.software_count
+                0x0000000080004fec        0x4 .fame-build/test_interrupts.o
+ .sbss.active   0x0000000080004ff0        0x4 .fame-build/test_interrupts.o
+ *fill*         0x0000000080004ff4        0x4 
+ .sbss          0x0000000080004ff8        0x8 .fame-build/syscalls.o
+ *(.scommon)
+
+.bss            0x0000000080005000    0x28020
+ *(.bss .bss.*)
+ .bss.source    0x0000000080005000      0x400 .fame-build/test_memory.o
+ .bss.copied    0x0000000080005400      0x400 .fame-build/test_memory.o
+ *fill*         0x0000000080005800      0x800 
+ .bss.arena     0x0000000080006000    0x20000 .fame-build/test_memory.o
+ .bss.physical_b
+                0x0000000080026000     0x1000 .fame-build/test_vm.o
+ .bss.physical_a
+                0x0000000080027000     0x1000 .fame-build/test_vm.o
+ .bss.leaves    0x0000000080028000     0x1000 .fame-build/test_vm.o
+ .bss.middle    0x0000000080029000     0x1000 .fame-build/test_vm.o
+ .bss.root      0x000000008002a000     0x1000 .fame-build/test_vm.o
+ .bss.code      0x000000008002b000       0x40 .fame-build/test_icache.o
+ .bss.matrix_b  0x000000008002b040      0x400 .fame-build/test_workloads.o
+ .bss.matrix_a  0x000000008002b440      0x400 .fame-build/test_workloads.o
+ *fill*         0x000000008002b840      0x7c0 
+ .bss.next      0x000000008002c000     0x1000 .fame-build/test_workloads.o
+ .bss           0x000000008002d000       0x20 .fame-build/syscalls.o
+ *(COMMON)
+
+.tdata          0x000000008002d040        0x0
+                0x000000008002d040                _tls_data = .
+ *(.tdata.begin)
+ .tdata.begin   0x000000008002d040        0x0 .fame-build/crt.o
+                0x000000008002d040                _tdata_begin
+ *(.tdata)
+ *(.tdata.end)
+ .tdata.end     0x000000008002d040        0x0 .fame-build/crt.o
+                0x000000008002d040                _tdata_end
+
+.tbss           0x000000008002d040       0x44
+ *(.tbss)
+ .tbss          0x000000008002d040       0x44 .fame-build/syscalls.o
+ *(.tbss.end)
+ .tbss.end      0x000000008002d084        0x0 .fame-build/crt.o
+                0x000000008002d084                _tbss_end
+                0x000000008002d040                _end = .
+OUTPUT(circt-fame-suite elf64-littleriscv)
+
+.debug_info     0x0000000000000000     0x8290
+ .debug_info    0x0000000000000000      0x3b9 .fame-build/runner-suite.o
+ .debug_info    0x00000000000003b9     0x18b3 .fame-build/test_integer.o
+ .debug_info    0x0000000000001c6c      0xae2 .fame-build/test_memory.o
+ .debug_info    0x000000000000274e      0x802 .fame-build/test_control.o
+ .debug_info    0x0000000000002f50      0xabf .fame-build/test_atomics.o
+ .debug_info    0x0000000000003a0f      0x73f .fame-build/test_csr.o
+ .debug_info    0x000000000000414e      0x730 .fame-build/test_traps.o
+ .debug_info    0x000000000000487e      0xa2a .fame-build/test_vm.o
+ .debug_info    0x00000000000052a8      0x301 .fame-build/test_interrupts.o
+ .debug_info    0x00000000000055a9      0xb65 .fame-build/test_fp.o
+ .debug_info    0x000000000000610e      0x1b3 .fame-build/test_icache.o
+ .debug_info    0x00000000000062c1      0xbb9 .fame-build/test_workloads.o
+ .debug_info    0x0000000000006e7a       0x29 .fame-build/crt.o
+ .debug_info    0x0000000000006ea3     0x13ed .fame-build/syscalls.o
+
+.debug_abbrev   0x0000000000000000     0x1d31
+ .debug_abbrev  0x0000000000000000      0x21d .fame-build/runner-suite.o
+ .debug_abbrev  0x000000000000021d      0x2ce .fame-build/test_integer.o
+ .debug_abbrev  0x00000000000004eb      0x22a .fame-build/test_memory.o
+ .debug_abbrev  0x0000000000000715      0x23e .fame-build/test_control.o
+ .debug_abbrev  0x0000000000000953      0x1be .fame-build/test_atomics.o
+ .debug_abbrev  0x0000000000000b11      0x118 .fame-build/test_csr.o
+ .debug_abbrev  0x0000000000000c29      0x201 .fame-build/test_traps.o
+ .debug_abbrev  0x0000000000000e2a      0x27a .fame-build/test_vm.o
+ .debug_abbrev  0x00000000000010a4      0x193 .fame-build/test_interrupts.o
+ .debug_abbrev  0x0000000000001237      0x1d1 .fame-build/test_fp.o
+ .debug_abbrev  0x0000000000001408      0x115 .fame-build/test_icache.o
+ .debug_abbrev  0x000000000000151d      0x2a5 .fame-build/test_workloads.o
+ .debug_abbrev  0x00000000000017c2       0x14 .fame-build/crt.o
+ .debug_abbrev  0x00000000000017d6      0x55b .fame-build/syscalls.o
+
+.debug_loclists
+                0x0000000000000000     0x3e91
+ .debug_loclists
+                0x0000000000000000      0x191 .fame-build/runner-suite.o
+ .debug_loclists
+                0x0000000000000191      0x908 .fame-build/test_integer.o
+ .debug_loclists
+                0x0000000000000a99      0x47a .fame-build/test_memory.o
+ .debug_loclists
+                0x0000000000000f13      0x3ff .fame-build/test_control.o
+ .debug_loclists
+                0x0000000000001312      0x58f .fame-build/test_atomics.o
+ .debug_loclists
+                0x00000000000018a1      0x1ff .fame-build/test_csr.o
+ .debug_loclists
+                0x0000000000001aa0      0x1dd .fame-build/test_traps.o
+ .debug_loclists
+                0x0000000000001c7d      0x4bd .fame-build/test_vm.o
+ .debug_loclists
+                0x000000000000213a      0x115 .fame-build/test_interrupts.o
+ .debug_loclists
+                0x000000000000224f      0x302 .fame-build/test_fp.o
+ .debug_loclists
+                0x0000000000002551       0x35 .fame-build/test_icache.o
+ .debug_loclists
+                0x0000000000002586      0x964 .fame-build/test_workloads.o
+ .debug_loclists
+                0x0000000000002eea      0xfa7 .fame-build/syscalls.o
+
+.debug_aranges  0x0000000000000000      0x4d0
+ .debug_aranges
+                0x0000000000000000       0x60 .fame-build/runner-suite.o
+ .debug_aranges
+                0x0000000000000060       0x60 .fame-build/test_integer.o
+ .debug_aranges
+                0x00000000000000c0       0x30 .fame-build/test_memory.o
+ .debug_aranges
+                0x00000000000000f0       0x80 .fame-build/test_control.o
+ .debug_aranges
+                0x0000000000000170      0x160 .fame-build/test_atomics.o
+ .debug_aranges
+                0x00000000000002d0       0x30 .fame-build/test_csr.o
+ .debug_aranges
+                0x0000000000000300       0x60 .fame-build/test_traps.o
+ .debug_aranges
+                0x0000000000000360       0x30 .fame-build/test_vm.o
+ .debug_aranges
+                0x0000000000000390       0x40 .fame-build/test_interrupts.o
+ .debug_aranges
+                0x00000000000003d0       0x30 .fame-build/test_fp.o
+ .debug_aranges
+                0x0000000000000400       0x30 .fame-build/test_icache.o
+ .debug_aranges
+                0x0000000000000430       0x30 .fame-build/test_workloads.o
+ .debug_aranges
+                0x0000000000000460       0x30 .fame-build/crt.o
+ .debug_aranges
+                0x0000000000000490       0x40 .fame-build/syscalls.o
+
+.debug_rnglists
+                0x0000000000000000      0xae6
+ .debug_rnglists
+                0x0000000000000000       0x71 .fame-build/runner-suite.o
+ .debug_rnglists
+                0x0000000000000071      0x104 .fame-build/test_integer.o
+ .debug_rnglists
+                0x0000000000000175      0x147 .fame-build/test_memory.o
+ .debug_rnglists
+                0x00000000000002bc       0xde .fame-build/test_control.o
+ .debug_rnglists
+                0x000000000000039a      0x115 .fame-build/test_atomics.o
+ .debug_rnglists
+                0x00000000000004af       0x5b .fame-build/test_csr.o
+ .debug_rnglists
+                0x000000000000050a       0x8a .fame-build/test_traps.o
+ .debug_rnglists
+                0x0000000000000594       0xe3 .fame-build/test_vm.o
+ .debug_rnglists
+                0x0000000000000677       0x72 .fame-build/test_interrupts.o
+ .debug_rnglists
+                0x00000000000006e9       0x68 .fame-build/test_fp.o
+ .debug_rnglists
+                0x0000000000000751       0x28 .fame-build/test_icache.o
+ .debug_rnglists
+                0x0000000000000779      0x225 .fame-build/test_workloads.o
+ .debug_rnglists
+                0x000000000000099e      0x148 .fame-build/syscalls.o
+
+.debug_line     0x0000000000000000     0x61c3
+ .debug_line    0x0000000000000000      0x3df .fame-build/runner-suite.o
+ .debug_line    0x00000000000003df      0xc5a .fame-build/test_integer.o
+ .debug_line    0x0000000000001039      0x806 .fame-build/test_memory.o
+ .debug_line    0x000000000000183f      0x53a .fame-build/test_control.o
+ .debug_line    0x0000000000001d79      0x726 .fame-build/test_atomics.o
+ .debug_line    0x000000000000249f      0x33b .fame-build/test_csr.o
+ .debug_line    0x00000000000027da      0x50c .fame-build/test_traps.o
+ .debug_line    0x0000000000002ce6      0x602 .fame-build/test_vm.o
+ .debug_line    0x00000000000032e8      0x353 .fame-build/test_interrupts.o
+ .debug_line    0x000000000000363b      0x539 .fame-build/test_fp.o
+ .debug_line    0x0000000000003b74      0x167 .fame-build/test_icache.o
+ .debug_line    0x0000000000003cdb      0xa60 .fame-build/test_workloads.o
+ .debug_line    0x000000000000473b      0x408 .fame-build/crt.o
+ .debug_line    0x0000000000004b43     0x1680 .fame-build/syscalls.o
+
+.debug_str      0x0000000000000000      0xad3
+ .debug_str     0x0000000000000000      0xad3 .fame-build/runner-suite.o
+                                        0x28a (size before relaxing)
+ .debug_str     0x0000000000000ad3        0x0 .fame-build/test_integer.o
+                                        0x2ce (size before relaxing)
+ .debug_str     0x0000000000000ad3        0x0 .fame-build/test_memory.o
+                                        0x243 (size before relaxing)
+ .debug_str     0x0000000000000ad3        0x0 .fame-build/test_control.o
+                                        0x1ca (size before relaxing)
+ .debug_str     0x0000000000000ad3        0x0 .fame-build/test_atomics.o
+                                        0x26a (size before relaxing)
+ .debug_str     0x0000000000000ad3        0x0 .fame-build/test_csr.o
+                                        0x190 (size before relaxing)
+ .debug_str     0x0000000000000ad3        0x0 .fame-build/test_traps.o
+                                        0x262 (size before relaxing)
+ .debug_str     0x0000000000000ad3        0x0 .fame-build/test_vm.o
+                                        0x268 (size before relaxing)
+ .debug_str     0x0000000000000ad3        0x0 .fame-build/test_interrupts.o
+                                        0x21e (size before relaxing)
+ .debug_str     0x0000000000000ad3        0x0 .fame-build/test_fp.o
+                                        0x1d5 (size before relaxing)
+ .debug_str     0x0000000000000ad3        0x0 .fame-build/test_icache.o
+                                        0x1a3 (size before relaxing)
+ .debug_str     0x0000000000000ad3        0x0 .fame-build/test_workloads.o
+                                        0x274 (size before relaxing)
+ .debug_str     0x0000000000000ad3        0x0 .fame-build/crt.o
+                                         0x9c (size before relaxing)
+ .debug_str     0x0000000000000ad3        0x0 .fame-build/syscalls.o
+                                        0x41a (size before relaxing)
+
+.debug_line_str
+                0x0000000000000000      0x2c5
+ .debug_line_str
+                0x0000000000000000      0x2c5 .fame-build/runner-suite.o
+                                        0x127 (size before relaxing)
+ .debug_line_str
+                0x00000000000002c5        0x0 .fame-build/test_integer.o
+                                         0xd5 (size before relaxing)
+ .debug_line_str
+                0x00000000000002c5        0x0 .fame-build/test_memory.o
+                                        0x131 (size before relaxing)
+ .debug_line_str
+                0x00000000000002c5        0x0 .fame-build/test_control.o
+                                         0xd5 (size before relaxing)
+ .debug_line_str
+                0x00000000000002c5        0x0 .fame-build/test_atomics.o
+                                         0xd5 (size before relaxing)
+ .debug_line_str
+                0x00000000000002c5        0x0 .fame-build/test_csr.o
+                                         0xd1 (size before relaxing)
+ .debug_line_str
+                0x00000000000002c5        0x0 .fame-build/test_traps.o
+                                        0x126 (size before relaxing)
+ .debug_line_str
+                0x00000000000002c5        0x0 .fame-build/test_vm.o
+                                        0x12d (size before relaxing)
+ .debug_line_str
+                0x00000000000002c5        0x0 .fame-build/test_interrupts.o
+                                         0xd8 (size before relaxing)
+ .debug_line_str
+                0x00000000000002c5        0x0 .fame-build/test_fp.o
+                                         0xd0 (size before relaxing)
+ .debug_line_str
+                0x00000000000002c5        0x0 .fame-build/test_icache.o
+                                         0xd4 (size before relaxing)
+ .debug_line_str
+                0x00000000000002c5        0x0 .fame-build/test_workloads.o
+                                        0x13f (size before relaxing)
+ .debug_line_str
+                0x00000000000002c5        0x0 .fame-build/crt.o
+                                         0x90 (size before relaxing)
+ .debug_line_str
+                0x00000000000002c5        0x0 .fame-build/syscalls.o
+                                        0x20d (size before relaxing)
+
+.comment        0x0000000000000000       0x19
+ .comment       0x0000000000000000       0x19 .fame-build/runner-suite.o
+                                         0x1a (size before relaxing)
+ .comment       0x0000000000000019        0x0 .fame-build/test_integer.o
+                                         0x1a (size before relaxing)
+ .comment       0x0000000000000019        0x0 .fame-build/test_memory.o
+                                         0x1a (size before relaxing)
+ .comment       0x0000000000000019        0x0 .fame-build/test_control.o
+                                         0x1a (size before relaxing)
+ .comment       0x0000000000000019        0x0 .fame-build/test_atomics.o
+                                         0x1a (size before relaxing)
+ .comment       0x0000000000000019        0x0 .fame-build/test_csr.o
+                                         0x1a (size before relaxing)
+ .comment       0x0000000000000019        0x0 .fame-build/test_traps.o
+                                         0x1a (size before relaxing)
+ .comment       0x0000000000000019        0x0 .fame-build/test_vm.o
+                                         0x1a (size before relaxing)
+ .comment       0x0000000000000019        0x0 .fame-build/test_interrupts.o
+                                         0x1a (size before relaxing)
+ .comment       0x0000000000000019        0x0 .fame-build/test_fp.o
+                                         0x1a (size before relaxing)
+ .comment       0x0000000000000019        0x0 .fame-build/test_icache.o
+                                         0x1a (size before relaxing)
+ .comment       0x0000000000000019        0x0 .fame-build/test_workloads.o
+                                         0x1a (size before relaxing)
+ .comment       0x0000000000000019        0x0 .fame-build/syscalls.o
+                                         0x1a (size before relaxing)
+
+.note.GNU-stack
+                0x0000000000000000        0x0
+ .note.GNU-stack
+                0x0000000000000000        0x0 .fame-build/runner-suite.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 .fame-build/test_integer.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 .fame-build/test_memory.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 .fame-build/test_control.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 .fame-build/test_atomics.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 .fame-build/test_csr.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 .fame-build/test_traps.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 .fame-build/test_vm.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 .fame-build/test_interrupts.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 .fame-build/test_fp.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 .fame-build/test_icache.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 .fame-build/test_workloads.o
+ .note.GNU-stack
+                0x0000000000000000        0x0 .fame-build/syscalls.o
+
+.riscv.attributes
+                0x0000000000000000       0x78
+ .riscv.attributes
+                0x0000000000000000       0x74 .fame-build/runner-suite.o
+ .riscv.attributes
+                0x0000000000000074       0x74 .fame-build/test_integer.o
+ .riscv.attributes
+                0x00000000000000e8       0x74 .fame-build/test_memory.o
+ .riscv.attributes
+                0x000000000000015c       0x74 .fame-build/test_control.o
+ .riscv.attributes
+                0x00000000000001d0       0x74 .fame-build/test_atomics.o
+ .riscv.attributes
+                0x0000000000000244       0x78 .fame-build/test_csr.o
+ .riscv.attributes
+                0x00000000000002bc       0x78 .fame-build/test_traps.o
+ .riscv.attributes
+                0x0000000000000334       0x78 .fame-build/test_vm.o
+ .riscv.attributes
+                0x00000000000003ac       0x78 .fame-build/test_interrupts.o
+ .riscv.attributes
+                0x0000000000000424       0x78 .fame-build/test_fp.o
+ .riscv.attributes
+                0x000000000000049c       0x74 .fame-build/test_icache.o
+ .riscv.attributes
+                0x0000000000000510       0x74 .fame-build/test_workloads.o
+ .riscv.attributes
+                0x0000000000000584       0x76 .fame-build/crt.o
+ .riscv.attributes
+                0x00000000000005fa       0x78 .fame-build/syscalls.o
+
+.debug_frame    0x0000000000000000      0xb38
+ .debug_frame   0x0000000000000000       0xc0 .fame-build/runner-suite.o
+ .debug_frame   0x00000000000000c0       0xc8 .fame-build/test_integer.o
+ .debug_frame   0x0000000000000188       0x70 .fame-build/test_memory.o
+ .debug_frame   0x00000000000001f8       0xf0 .fame-build/test_control.o
+ .debug_frame   0x00000000000002e8      0x230 .fame-build/test_atomics.o
+ .debug_frame   0x0000000000000518       0x50 .fame-build/test_csr.o
+ .debug_frame   0x0000000000000568       0xd0 .fame-build/test_traps.o
+ .debug_frame   0x0000000000000638       0x68 .fame-build/test_vm.o
+ .debug_frame   0x00000000000006a0       0x70 .fame-build/test_interrupts.o
+ .debug_frame   0x0000000000000710       0x60 .fame-build/test_fp.o
+ .debug_frame   0x0000000000000770       0x48 .fame-build/test_icache.o
+ .debug_frame   0x00000000000007b8       0x68 .fame-build/test_workloads.o
+ .debug_frame   0x0000000000000820      0x318 .fame-build/syscalls.o

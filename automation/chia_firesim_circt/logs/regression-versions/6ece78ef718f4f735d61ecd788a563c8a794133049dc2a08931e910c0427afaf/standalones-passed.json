@@ -1,0 +1,20 @@
+{
+  "verification": "/scratch/jfx/fsim-circt/automation/chia_firesim_circt/logs/verification/20261004T204001Z-pid3597686-iter2-full",
+  "workloads": [
+    "circt-metasim-bare",
+    "circt-fame-suite",
+    "circt-fame-rocket-suite",
+    "circt-fame-integer",
+    "circt-fame-memory",
+    "circt-fame-control",
+    "circt-fame-atomics",
+    "circt-fame-csr",
+    "circt-fame-traps",
+    "circt-fame-vm",
+    "circt-fame-interrupts",
+    "circt-fame-fp",
+    "circt-fame-icache",
+    "circt-fame-workloads",
+    "circt-fame-uart"
+  ]
+}

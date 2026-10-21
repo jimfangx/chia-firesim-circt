@@ -1,0 +1,217 @@
+{
+  "isa": "rv64gc_zicntr_zihpm",
+  "binaries": {
+    "circt-fame-integer": {
+      "mask": 1,
+      "checks": 14785,
+      "signature": "0xfb9b78f1bdfea84a",
+      "tests": [
+        {
+          "name": "integer",
+          "checks": 14785,
+          "signature": "0x5966583a67c3c891"
+        }
+      ]
+    },
+    "circt-fame-memory": {
+      "mask": 2,
+      "checks": 58802,
+      "signature": "0x8361100083732165",
+      "tests": [
+        {
+          "name": "memory",
+          "checks": 58802,
+          "signature": "0x518018b83a9391d8"
+        }
+      ]
+    },
+    "circt-fame-control": {
+      "mask": 4,
+      "checks": 2952,
+      "signature": "0x2718b5a3a0c8f382",
+      "tests": [
+        {
+          "name": "control",
+          "checks": 2952,
+          "signature": "0xd541265a2d172100"
+        }
+      ]
+    },
+    "circt-fame-atomics": {
+      "mask": 8,
+      "checks": 3556,
+      "signature": "0xf0189f129235d863",
+      "tests": [
+        {
+          "name": "atomics",
+          "checks": 3556,
+          "signature": "0x9450eeaf44a34f42"
+        }
+      ]
+    },
+    "circt-fame-csr": {
+      "mask": 16,
+      "checks": 41,
+      "signature": "0x18d915707937211b",
+      "tests": [
+        {
+          "name": "csr",
+          "checks": 41,
+          "signature": "0xa3cd2ce1fa447645"
+        }
+      ]
+    },
+    "circt-fame-traps": {
+      "mask": 32,
+      "checks": 14,
+      "signature": "0xcdb6f95e2cd0917c",
+      "tests": [
+        {
+          "name": "traps",
+          "checks": 14,
+          "signature": "0x3b3e60a814aeb478"
+        }
+      ]
+    },
+    "circt-fame-vm": {
+      "mask": 64,
+      "checks": 1035,
+      "signature": "0x3fa2005140ad009a",
+      "tests": [
+        {
+          "name": "vm",
+          "checks": 1035,
+          "signature": "0x8bef25aeb180f38a"
+        }
+      ]
+    },
+    "circt-fame-interrupts": {
+      "mask": 128,
+      "checks": 3,
+      "signature": "0x4612d6fc2f4e9402",
+      "tests": [
+        {
+          "name": "interrupts",
+          "checks": 3,
+          "signature": "0xf0f27dae2528eb00"
+        }
+      ]
+    },
+    "circt-fame-fp": {
+      "mask": 256,
+      "checks": 157,
+      "signature": "0x0202dae796cc7d3a",
+      "tests": [
+        {
+          "name": "fp",
+          "checks": 157,
+          "signature": "0x47dce551ad063657"
+        }
+      ]
+    },
+    "circt-fame-icache": {
+      "mask": 512,
+      "checks": 66,
+      "signature": "0x8a433b942f7e25db",
+      "tests": [
+        {
+          "name": "icache",
+          "checks": 66,
+          "signature": "0xedff6fafeda6c015"
+        }
+      ]
+    },
+    "circt-fame-workloads": {
+      "mask": 1024,
+      "checks": 8730,
+      "signature": "0x475a923854b2340b",
+      "tests": [
+        {
+          "name": "workloads",
+          "checks": 8730,
+          "signature": "0xa82cc78695c2c95f"
+        }
+      ]
+    },
+    "circt-fame-suite": {
+      "mask": 2047,
+      "checks": 90141,
+      "signature": "0x78194504c338c229",
+      "tests": [
+        {
+          "name": "integer",
+          "checks": 14785,
+          "signature": "0x5966583a67c3c891"
+        },
+        {
+          "name": "memory",
+          "checks": 58802,
+          "signature": "0x518018b83a9391d8"
+        },
+        {
+          "name": "control",
+          "checks": 2952,
+          "signature": "0xd541265a2d172100"
+        },
+        {
+          "name": "atomics",
+          "checks": 3556,
+          "signature": "0x9450eeaf44a34f42"
+        },
+        {
+          "name": "csr",
+          "checks": 41,
+          "signature": "0xa3cd2ce1fa447645"
+        },
+        {
+          "name": "traps",
+          "checks": 14,
+          "signature": "0x3b3e60a814aeb478"
+        },
+        {
+          "name": "vm",
+          "checks": 1035,
+          "signature": "0x8bef25aeb180f38a"
+        },
+        {
+          "name": "interrupts",
+          "checks": 3,
+          "signature": "0xf0f27dae2528eb00"
+        },
+        {
+          "name": "fp",
+          "checks": 157,
+          "signature": "0x47dce551ad063657"
+        },
+        {
+          "name": "icache",
+          "checks": 66,
+          "signature": "0xedff6fafeda6c015"
+        },
+        {
+          "name": "workloads",
+          "checks": 8730,
+          "signature": "0xa82cc78695c2c95f"
+        }
+      ]
+    }
+  },
+  "sha256": {
+    "circt-fame-integer": "abd08df7b9621bc095e3b9b640248b4bd34565459343bf48eb42dd58b1852c91",
+    "circt-fame-memory": "8a9ba25ddec13fc97e7cea9596e402becdc1ab478c694a9bf147b60a5f755856",
+    "circt-fame-control": "0fcaa4a36409c34524eec6d53916353fe20a2dcb569edb754f089bb610c373da",
+    "circt-fame-atomics": "ef96b3d410f55794a70a0843ab38e9f235015546cf2a4cf5dc3d7d655098340a",
+    "circt-fame-csr": "f552ce519b5d17b3dbe7daa2044ae6ef2426c0c00d0ebed5cd5de8713bc6f978",
+    "circt-fame-traps": "52a3485649ad58662c8939745984b51089f666aa589efaf8db9d03247cab3619",
+    "circt-fame-vm": "900a14ac186574326e4c7f5effecbc926b386de4a1e690c7b0e6fc85e9e8a276",
+    "circt-fame-interrupts": "1af58e52f40afc65fced0a7198a1aac3b56b543444e1898fe00bbcb3b701b364",
+    "circt-fame-fp": "31f5ea6b965f8da3771dd9694e94765754255f748f39d7808fef65c2c842b8ea",
+    "circt-fame-icache": "1b9daf69b3ffc89626ba1eac5b54a85dba1c3b243983d1195a765665b225e36f",
+    "circt-fame-workloads": "e5733aaa3a4bcd29aff2ac54f107cfd56a1b7a31afb6e97506fddfdb20ec8fd9",
+    "circt-fame-suite": "cbe9167abf7518fd522f23946edc5911353e4b5ba6d367626d842a0c87aaac47"
+  },
+  "excluded": [
+    "circt-fame-uart",
+    "circt-fame-rocket-suite"
+  ]
+}

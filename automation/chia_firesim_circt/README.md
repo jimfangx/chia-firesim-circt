@@ -1,8 +1,14 @@
 # FireSim CIRCT Chia loop
 
-This is the local, persistent engineering harness for the FireSim Golden Gate
-Scala-FIRRTL Compiler (SFC) to CIRCT port. It does not attempt the port itself.
-`FIRESIM_CIRCT_PORT_PLAN.md` remains the implementation charter.
+This is the local, persistent harness for the FireSim Golden Gate Scala-FIRRTL
+Compiler (SFC) to CIRCT port. `FIRESIM_CIRCT_PORT_PLAN.md` is the
+implementation charter. Codex implementation work is restricted to the core
+compiler under `sims/firesim/sim`: the existing Scala SFC sources and recorded
+golden artifacts are the oracle, and the CIRCT compiler plus its direct build
+wiring are the work product. Automation, FireMarshal, workloads, Python
+helpers, runtime YAML, and Ray/Chia plumbing are strongly discouraged unless a
+minimal change directly unblocks core compiler work or a golden comparison;
+they are never porting progress by themselves.
 
 The loop uses CHIA's `CodexLLM` backend, which shells out to the authenticated
 local `codex` CLI. It has no OpenAI API-key path. The worker starts Codex in
@@ -37,14 +43,15 @@ chia job submit -- \
   --iterations 12 --verify full
 ```
 
-Every iteration performs one Codex porting step followed by the complete
-ordered gate: FireSim `replacertl` compile, Verilator metasimulation, then the
-U250 build/boot flow. A failed gate feeds its full logs into the next Codex
-turn. A passing gate does not end the engineering loop: Codex must explicitly
-end its response with `LOOP_COMPLETE: yes`, and that declaration is accepted
-only after the complete gate passes. If the iteration cap is reached without
-that validated declaration, the Ray job exits as incomplete rather than marked
-successful.
+Every iteration performs one Codex porting step followed by FireSim
+`replacertl` compile and bare-metal Verilator metasimulation. The U250
+build/Linux-boot gate runs only after 15 consecutive bare-metal successes; a
+bare or hardware failure resets that streak. A failed gate feeds its full logs
+into the next Codex turn. A passing gate does not end the engineering loop:
+Codex must explicitly end its response with `LOOP_COMPLETE: yes`, and that
+declaration is accepted only after a scheduled, complete U250 gate passes. If
+the iteration cap is reached without that validated declaration, the Ray job
+exits as incomplete rather than marked successful.
 
 Buildroot normally remains running at a login shell, so before every complete
 gate the harness builds and installs its `circt-boot-poweroff` FireMarshal
@@ -58,6 +65,24 @@ changed.
 chia job submit -- \
   python /scratch/jfx/fsim-circt/automation/chia_firesim_circt/loop.py \
   --iterations 9999 --verify full
+```
+
+## Stop or remove a previous job
+
+List submitted jobs and stop a running loop before replacing it with a new
+submission:
+
+```bash
+chia job list
+chia job stop <job-id>
+```
+
+Stopping ends the Ray job but does not revert any Codex edits in the shared
+checkout or delete its logs. To remove only the stopped job's Ray metadata
+afterward, use:
+
+```bash
+chia job delete <job-id>
 ```
 
 ## Watch a live loop
@@ -119,11 +144,40 @@ can inspect the full artifact when debugging.
 
 ## Verification gates
 
+The October 13 policy keeps a fresh CIRCT compile and bare-metal smoke every
+iteration. The two long combined Rocket suites run whenever simulator,
+driver/build/runtime, tool/environment, or workload inputs change. For unchanged
+inputs, their passing evidence can be reused for up to nine iterations; full
+suites refresh after that and before every hardware attempt. A smoke failure
+invalidates the cache. `regression-results.json` explicitly distinguishes fresh
+execution from reused evidence and links to the original full verification.
+The cache is `logs/metasim-suite-cache.json`; deleting it forces fresh suites.
+
+Broader target coverage is now the priority in `FIRESIM_CIRCT_PORT_PLAN.md`.
+The 13 U250 sample recipes have separate SFC golden archives under
+`golden/u250-sfc-20261013`; inspect their `manifest.json` for completion and
+exact paths. To resume generation after sourcing the manager environment:
+
+```bash
+python /scratch/jfx/fsim-circt/automation/chia_firesim_circt/generate_u250_sfc_goldens.py \
+  --output-root /scratch/jfx/fsim-circt/automation/chia_firesim_circt/golden/u250-sfc-20261013
+```
+
+Generation snapshots the existing SFC/Chipyard assembly jars and never invokes
+Vivado. Each CIRCT candidate must use the corresponding archived pre-MIDAS
+inputs, preserve the recipe's platform semantics, and compare against its
+actual transformed SFC RTL. Generalized CIRCT matrix gates remain to be wired
+into the harness; the golden-generation manifest is not CIRCT parity evidence.
+
 `--verify compile` runs the FireSim manager's `replacertl` task, which invokes
 the existing `make replace-rtl` Golden Gate compiler recipe and stops before
 driver or FPGA work. `--verify metasim` adds FireSim's Verilator metasimulation
-of that transformed RTL. It generates a local runtime config with
-`metasimulation_enabled: true`, then invokes:
+of that transformed RTL using `circt-metasim-bare.json`, not Linux. The tiny
+RISC-V program performs volatile memory reads/writes and a fixed checksum,
+prints `CIRCT_METASIM_BARE: PASS`, and exits through `tohost`. The harness
+requires that exact UART marker, so a manager success alone cannot pass the
+gate. It generates a local runtime config with `metasimulation_enabled: true`,
+then invokes:
 
 ```text
 firesim builddriver
@@ -132,8 +186,10 @@ firesim infrasetup
 firesim runworkload
 ```
 
-`--verify full` is the autonomous profile: it performs both gates and, only
-when they pass, invokes:
+`--verify full` is the autonomous profile: it performs the compiler and
+bare-metal metasim gates on every iteration. It invokes the U250 Linux gate
+only after 15 consecutive bare-metal successes (the default, configurable with
+`--linux-boot-after-bare-successes`) and then resets the streak:
 
 ```text
 firesim buildbitstream
@@ -144,6 +200,8 @@ firesim runworkload
 
 The last command boots the `circt-boot-poweroff.json` smoke workload on the
 newly built U250 image; its guest powers itself off after the boot marker.
+Tracing is enabled for both Verilator metasimulation and U250 runs; traces are
+retained with the corresponding FireSim workload results.
 The harness never SSHes directly to an FPGA or build host; the FireSim manager
 handles that communication. A failed verification is returned to Codex as the
 next iteration's evidence: the error tail, complete captured stdout/stderr

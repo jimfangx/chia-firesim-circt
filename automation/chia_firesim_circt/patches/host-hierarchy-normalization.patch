@@ -1,0 +1,404 @@
+diff --git a/sim/goldengate-circt/include/goldengate/SimulatorRTL.h b/sim/goldengate-circt/include/goldengate/SimulatorRTL.h
+--- a/sim/goldengate-circt/include/goldengate/SimulatorRTL.h
++++ b/sim/goldengate-circt/include/goldengate/SimulatorRTL.h
+@@ -5,6 +5,16 @@
+ #include <string>
+ 
+ namespace goldengate {
++// Collapse the single-use host assembly wrapper chain after driver analysis,
++// before XDC path resolution. Target/bridge/SRAM modules stay hierarchical.
++// Native CIRCT inlining maintains connections, annotations and inner symbols.
++// The serialized archive remains historical; inline blackboxes are attached
++// before dead-module elimination and must not be replayed afterwards.
++// Failure leaves the source IR unchanged. Repeated calls are a no-op.
++mlir::LogicalResult normalizeHostHierarchy(mlir::ModuleOp source,
++                                         llvm::StringRef outputFilename,
++                                         unsigned &inlinedWrappers,
++                                         std::string &error);
+ // Match CIRCT's generated memory initializer and share one 32-bit random
+ // draw across chunks and rows, as SFC's replicated initialization word does.
+ // Unknown loop shapes, guards, bounds and extra consumers remain unchanged.
+diff --git a/sim/goldengate-circt/lib/Support/SimulatorRTL.cpp b/sim/goldengate-circt/lib/Support/SimulatorRTL.cpp
+--- a/sim/goldengate-circt/lib/Support/SimulatorRTL.cpp
++++ b/sim/goldengate-circt/lib/Support/SimulatorRTL.cpp
+@@ -9,6 +9,9 @@
+ #include "circt/Dialect/FIRRTL/CHIRRTLDialect.h"
+ #include "circt/Dialect/FIRRTL/FIRRTLAnnotations.h"
+ #include "circt/Dialect/FIRRTL/FIRRTLOps.h"
++#include "circt/Dialect/FIRRTL/Passes.h"
++#include "circt/Support/Namespace.h"
++#include "goldengate/AnnotationClasses.h"
+ #include "circt/Dialect/HW/HWDialect.h"
+ #include "circt/Dialect/HW/HWOps.h"
+ #include "circt/Dialect/OM/OMDialect.h"
+@@ -21,11 +24,14 @@
+ #include "mlir/IR/Verifier.h"
+ #include "llvm/ADT/ScopeExit.h"
+ #include "llvm/ADT/StringMap.h"
++#include "llvm/ADT/StringSet.h"
++#include "llvm/ADT/DenseSet.h"
+ #include "llvm/Support/FileSystem.h"
+ #include "llvm/Support/MathExtras.h"
+ #include "llvm/Support/Path.h"
+ #include "llvm/Support/raw_ostream.h"
+ #include <algorithm>
++#include <functional>
+ 
+ using namespace mlir;
+ using namespace circt;
+@@ -242,6 +248,8 @@
+ LogicalResult attachInlineBlackBoxes(firrtl::CircuitOp circuit,
+                                     StringRef outputFilename,
+                                     std::string &error) {
++  if (circuit->hasAttr("goldengate.inlineBlackBoxesPrepared"))
++    return success();
+   auto archive = circuit->getAttrOfType<ArrayAttr>("rawAnnotations");
+   if (!archive)
+     return success();
+@@ -319,6 +327,149 @@
+ }
+ } // namespace
+ 
++LogicalResult goldengate::normalizeHostHierarchy(ModuleOp source,
++                                                StringRef outputFilename,
++                                                unsigned &inlinedWrappers,
++                                                std::string &error) {
++  using namespace firrtl;
++  inlinedWrappers = 0;
++  auto reject = [&](StringRef reason) {
++    error = reason.str();
++    return failure();
++  };
++  auto circuits = source.getOps<CircuitOp>();
++  if (std::distance(circuits.begin(), circuits.end()) != 1 ||
++      failed(verify(source)))
++    return reject("host hierarchy requires one valid FIRRTL circuit");
++  auto original = *circuits.begin();
++  if (original->hasAttr("goldengate.hostHierarchyNormalized"))
++    return success();
++  auto *context = source.getContext();
++  context->loadDialect<debug::DebugDialect>();
++  OwningOpRef<ModuleOp> candidate = cast<ModuleOp>(source->clone());
++  auto circuit = *candidate->getOps<CircuitOp>().begin();
++  auto raw = circuit->getAttrOfType<ArrayAttr>("rawAnnotations");
++  if (!raw)
++    return reject("host hierarchy requires retained annotations");
++  SymbolTable symbols(circuit);
++  auto top = dyn_cast_or_null<FModuleOp>(symbols.lookup("FPGATop"));
++  if (!top)
++    return reject("host hierarchy requires the assembled FPGATop");
++
++  // Explicit user XDC references must remain resolvable. Preserve every
++  // module mentioned in their local or nonlocal paths rather than rewriting
++  // serialized reference strings. Generated clock constraints are attached
++  // to actual target instances and follow the final instance graph.
++  llvm::StringSet<> protectedModules;
++  std::function<void(Attribute)> protect = [&](Attribute attr) {
++    if (!attr) return;
++    if (auto text = dyn_cast<StringAttr>(attr)) {
++      StringRef value = text.getValue();
++      if (!value.starts_with("~")) return;
++      auto hierarchy = value.split('|').second.split('>').first;
++      SmallVector<StringRef> path;
++      hierarchy.split(path, '/');
++      if (!path.empty()) protectedModules.insert(path.front());
++      for (auto step : ArrayRef<StringRef>(path).drop_front())
++        protectedModules.insert(step.split(':').second);
++    } else if (auto array = dyn_cast<ArrayAttr>(attr)) {
++      for (auto item : array) protect(item);
++    } else if (auto dict = dyn_cast<DictionaryAttr>(attr)) {
++      for (auto item : dict) protect(item.getValue());
++    }
++  };
++  for (auto attr : raw) {
++    auto annotation = dyn_cast<DictionaryAttr>(attr);
++    auto cls = annotation ? annotation.getAs<StringAttr>("class") : StringAttr();
++    if (cls && cls.getValue() == AnnotationClasses::InternalXDC)
++      protect(annotation.get("argumentList"));
++  }
++
++  llvm::DenseMap<Attribute, unsigned> uses;
++  circuit.walk([&](InstanceOp instance) { ++uses[instance.getModuleNameAttr()]; });
++  SmallVector<FModuleOp> wrappers;
++  llvm::DenseSet<Operation *> visited;
++  FModuleOp parent = top;
++  while (visited.insert(parent.getOperation()).second) {
++    InstanceOp sim;
++    for (auto instance : parent.getOps<InstanceOp>())
++      if (instance.getName() == "sim") {
++        if (sim) return reject("ambiguous host assembly wrapper chain");
++        sim = instance;
++      }
++    if (!sim) break;
++    auto child = dyn_cast_or_null<FModuleOp>(symbols.lookup(sim.getModuleName()));
++    if (!child || !child.getName().starts_with("GG") ||
++        !child.getName().ends_with("Wrapper")) break;
++    // Retain the innermost simulation boundary (channel/target wrapper).
++    // Only assembly modules that themselves forward through `sim` qualify.
++    bool forwards = false;
++    for (auto instance : child.getOps<InstanceOp>())
++      forwards |= instance.getName() == "sim";
++    if (!forwards) break;
++    if (uses[sim.getModuleNameAttr()] != 1)
++      return reject("host assembly wrapper must have one instance");
++    if (!protectedModules.count(child.getName())) wrappers.push_back(child);
++    parent = child;
++  }
++  if (wrappers.empty()) return success();
++
++  // Attach retained blackbox sources before the native inliner removes dead
++  // modules. RTL emission then uses those attached annotations, not obsolete
++  // module targets from the historical archive.
++  if (failed(attachInlineBlackBoxes(circuit, outputFilename, error)))
++    return failure();
++  circuit->setAttr("goldengate.inlineBlackBoxesPrepared", UnitAttr::get(context));
++  llvm::DenseSet<Operation *> existing;
++  top.walk([&](Operation *op) { existing.insert(op); });
++  auto inlineAnno = DictionaryAttr::get(context, {
++      {StringAttr::get(context, "class"),
++       StringAttr::get(context, "firrtl.passes.InlineAnnotation")}});
++  for (auto wrapper : wrappers) {
++    // Builders leave assembly modules public. Once their unique instance is
++    // inlined they are internal implementation details, not exported roots;
++    // otherwise CIRCT retains every progressively flattened duplicate body.
++    SymbolTable::setSymbolVisibility(wrapper, SymbolTable::Visibility::Private);
++    AnnotationSet annotations(wrapper);
++    annotations.addAnnotations(ArrayRef<Attribute>{inlineAnno});
++    annotations.applyToOperation(wrapper);
++  }
++  PassManager passes(context);
++  passes.nest<CircuitOp>().addPass(createInlinerPass());
++  if (failed(passes.run(*candidate)))
++    return reject("CIRCT host assembly wrapper inlining failed");
++
++  // Native inlining prefixes names with every removed instance. Bound those
++  // names too: sim_sim_... is a construction artifact, not a useful identity.
++  // Existing declarations and explicit XDC roots keep their original names.
++  // CIRCT inner symbols remain untouched and retain their native rename map.
++  if (!protectedModules.count(top.getName())) {
++    circt::Namespace names;
++    for (auto name : top.getPortNames())
++      names.newName(cast<StringAttr>(name).getValue());
++    SmallVector<Operation *> shorten;
++    top.walk([&](Operation *op) {
++      auto name = op->getAttrOfType<StringAttr>("name");
++      if (!name) return;
++      if (!existing.count(op) && name.getValue().starts_with("sim_sim_"))
++        shorten.push_back(op);
++      else names.newName(name.getValue());
++    });
++    for (auto *op : shorten) {
++      StringRef base = op->getAttrOfType<StringAttr>("name").getValue();
++      while (base.consume_front("sim_")) {}
++      op->setAttr("name", StringAttr::get(context, names.newName(base)));
++    }
++  }
++  circuit->setAttr("goldengate.hostHierarchyNormalized", UnitAttr::get(context));
++  if (failed(verify(*candidate)))
++    return reject("host hierarchy normalization produced invalid FIRRTL IR");
++  inlinedWrappers = wrappers.size();
++  original->setAttrs(circuit->getAttrs());
++  original.getBody().takeBody(circuit.getBody());
++  return success();
++}
++
+ LogicalResult goldengate::emitSimulatorRTL(ModuleOp source,
+                                           StringRef inputFilename,
+                                           StringRef outputFilename,
+diff --git a/sim/goldengate-circt/tools/goldengate.cpp b/sim/goldengate-circt/tools/goldengate.cpp
+--- a/sim/goldengate-circt/tools/goldengate.cpp
++++ b/sim/goldengate-circt/tools/goldengate.cpp
+@@ -3762,6 +3762,25 @@
+       if (failed(goldengate::emitAllAnnotations(circuit, xilinxAnnotations, error)))
+         return fail("Xilinx host specialization annotations: " + error);
+       llvm::outs() << "Specialized CIRCT abstract clocks to Xilinx BUFGCE in " << xilinxPath << '\n';
++      // Driver analyses consume the deliberately retained assembly boundaries.
++      // Collapse those boundaries only once every header has been prepared;
++      // XDC then resolves the final, shallow native CIRCT instance graph.
++      if (!enableAutoILA)
++        if (int result = prepareDriverHeaders()) return result;
++      llvm::SmallString<256> normalizedRTLPath(outputDir);
++      llvm::sys::path::append(normalizedRTLPath, outputBase + ".sv");
++      unsigned inlinedHostWrappers = 0;
++      if (failed(goldengate::normalizeHostHierarchy(
++              *module, normalizedRTLPath, inlinedHostWrappers, error)))
++        return fail("host hierarchy normalization: " + error);
++      llvm::SmallString<256> normalizedHierarchyPath(outputDir);
++      llvm::sys::path::append(normalizedHierarchyPath, "post-host-hierarchy-normalization.mlir");
++      std::error_code hierarchyError;
++      llvm::raw_fd_ostream hierarchyOut(normalizedHierarchyPath, hierarchyError);
++      if (hierarchyError) return fail("cannot write normalized host hierarchy: " + hierarchyError.message());
++      module->print(hierarchyOut); hierarchyOut << '\n'; hierarchyOut.close();
++      llvm::outs() << "Inlined " << inlinedHostWrappers
++                   << " CIRCT host assembly wrappers in " << normalizedHierarchyPath << '\n';
+       if (failed(goldengate::prepareXDCOutput(circuit, error)))
+         return fail("XDC output preparation: " + error);
+       if (enableAutoILA) {
+@@ -3774,7 +3793,7 @@
+           updated.push_back(attr);
+         }
+         circuit->setAttr("rawAnnotations", mlir::ArrayAttr::get(&context, updated));
+-      } else if (int result = prepareDriverHeaders()) return result;
++      }
+       llvm::SmallString<256> xdcAnnotations(outputDir);
+       llvm::sys::path::append(xdcAnnotations, "post-fame-xdc-all.json");
+       if (failed(goldengate::emitAllAnnotations(circuit, xdcAnnotations, error)))
+diff --git a/sim/goldengate-circt/CMakeLists.txt b/sim/goldengate-circt/CMakeLists.txt
+--- a/sim/goldengate-circt/CMakeLists.txt
++++ b/sim/goldengate-circt/CMakeLists.txt
+@@ -814,6 +814,17 @@
+   target_link_libraries(goldengate-metasim-interface-header-test PRIVATE
+     CIRCTFIRRTL CIRCTHW CIRCTSupport MLIRParser MLIRIR MLIRSupport LLVMSupport)
+   add_test(NAME goldengate-metasim-interface-header COMMAND goldengate-metasim-interface-header-test)
++  add_executable(goldengate-host-hierarchy-test
++    test/Support/HostHierarchyTest.cpp lib/Support/SimulatorRTL.cpp
++    lib/Support/XDCEmission.cpp lib/Support/AnnotationEmission.cpp)
++  target_compile_features(goldengate-host-hierarchy-test PRIVATE cxx_std_17)
++  target_compile_options(goldengate-host-hierarchy-test PRIVATE -fno-rtti)
++  target_include_directories(goldengate-host-hierarchy-test PRIVATE
++    include ${CIRCT_INCLUDE_DIRS} ${LLVM_INCLUDE_DIRS} ${MLIR_INCLUDE_DIRS})
++  target_link_libraries(goldengate-host-hierarchy-test PRIVATE
++    CIRCTFirtool CIRCTFIRRTL CIRCTFIRRTLTransforms CIRCTHW CIRCTSupport
++    MLIRParser MLIRIR MLIRSupport LLVMSupport)
++  add_test(NAME goldengate-host-hierarchy COMMAND goldengate-host-hierarchy-test)
+   add_executable(goldengate-simulator-rtl-test
+     test/Support/SimulatorRTLTest.cpp lib/Support/SimulatorRTL.cpp
+     lib/Transforms/LowerTypes.cpp lib/Support/TargetUtils.cpp)
+diff --git a/sim/goldengate-circt/test/Support/HostHierarchyTest.cpp b/sim/goldengate-circt/test/Support/HostHierarchyTest.cpp
+new file mode 100644
+--- /dev/null
++++ b/sim/goldengate-circt/test/Support/HostHierarchyTest.cpp
+@@ -0,0 +1,133 @@
++// See LICENSE for license details.
++// Assembly-only inlining must preserve target hierarchy and final XDC paths.
++#include "goldengate/SimulatorRTL.h"
++#include "goldengate/XDCEmission.h"
++#include "goldengate/AnnotationEmission.h"
++#include "goldengate/AnnotationClasses.h"
++#include "circt/Dialect/FIRRTL/CHIRRTLDialect.h"
++#include "circt/Dialect/HW/HWDialect.h"
++#include "mlir/IR/Builders.h"
++#include "mlir/IR/Verifier.h"
++#include "mlir/Parser/Parser.h"
++#include "llvm/Support/raw_ostream.h"
++#include <stdexcept>
++using namespace mlir;
++using namespace circt::firrtl;
++namespace {
++void require(bool ok, StringRef reason) {
++  if (!ok) throw std::runtime_error(reason.str());
++}
++std::string dump(Operation *op) {
++  std::string text; llvm::raw_string_ostream out(text); op->print(out); return text;
++}
++OwningOpRef<ModuleOp> fixture(MLIRContext &ctx, unsigned depth) {
++  std::string text = "module { firrtl.circuit \"FPGATop\" {\n";
++  auto name = [&](unsigned i) {
++    return i == 0 ? std::string("FPGATop") :
++        "GGStage" + std::to_string(i) + "Wrapper";
++  };
++  for (unsigned i = 0; i <= depth; ++i) {
++    text += "firrtl.module " + std::string(i ? "private " : "") + "@" + name(i) +
++      "(in %clock: !firrtl.clock, in %in: !firrtl.uint<8>, out %out: !firrtl.uint<8>) {\n";
++    auto child = i == depth ? "Target" : name(i + 1);
++    text += "%child:3 = firrtl.instance " + std::string(i == depth ? "target" : "sim") +
++      " @" + child + "(in clock: !firrtl.clock, in in: !firrtl.uint<8>, out out: !firrtl.uint<8>)\n"
++      "firrtl.connect %child#0, %clock : !firrtl.clock, !firrtl.clock\n"
++      "firrtl.connect %child#1, %in : !firrtl.uint<8>, !firrtl.uint<8>\n"
++      "firrtl.connect %out, %child#2 : !firrtl.uint<8>, !firrtl.uint<8>\n}\n";
++  }
++  text += "firrtl.module private @Target(in %clock: !firrtl.clock, in %in: !firrtl.uint<8>, out %out: !firrtl.uint<8>) {\n"
++    "%state = firrtl.reg %clock : !firrtl.clock, !firrtl.uint<8>\n"
++    "firrtl.connect %state, %in : !firrtl.uint<8>, !firrtl.uint<8>\n"
++    "firrtl.connect %out, %state : !firrtl.uint<8>, !firrtl.uint<8>\n}\n} }";
++  auto result = parseSourceString<ModuleOp>(text, &ctx);
++  require(bool(result), "fixture parse");
++  OpBuilder b(&ctx); auto c = *result->getOps<CircuitOp>().begin();
++  c->setAttr("rawAnnotations", b.getArrayAttr({b.getDictionaryAttr({
++      b.getNamedAttr("class", b.getStringAttr(goldengate::AnnotationClasses::XDCPaths)),
++      b.getNamedAttr("postLinkPath", b.getStringAttr("firesim_top/top"))})}));
++  return result;
++}
++}
++int main(int argc, char **argv) {
++  try {
++    MLIRContext ctx;
++    ctx.loadDialect<FIRRTLDialect, circt::chirrtl::CHIRRTLDialect,
++                    circt::hw::HWDialect>();
++    std::string error; unsigned count;
++    for (unsigned depth : {1u, 3u, 98u}) {
++      auto root = fixture(ctx, depth);
++      auto c = *root->getOps<CircuitOp>().begin();
++      FModuleOp target;
++      for (auto m : c.getOps<FModuleOp>()) if (m.getName() == "Target") target = m;
++      auto targetBefore = dump(target);
++      require(succeeded(goldengate::normalizeHostHierarchy(*root, "/tmp/host-hierarchy-test.sv", count, error)), error);
++      require(count == depth - 1 && succeeded(verify(*root)), "wrong collapse count or invalid IR");
++      // The source circuit operation survives; its old child handles do not.
++      c = *root->getOps<CircuitOp>().begin();
++      for (auto m : c.getOps<FModuleOp>()) if (m.getName() == "Target") target = m;
++      require(dump(target) == targetBefore, "target body changed");
++      unsigned modules = 0; for (auto m : c.getOps<FModuleOp>()) ++modules;
++      require(modules == 3, "host wrappers remain or target was flattened");
++      auto normalized = dump(*root);
++      require(succeeded(goldengate::normalizeHostHierarchy(*root, "/tmp/host-hierarchy-test.sv", count, error)) && count == 0 && dump(*root) == normalized, "normalization is not idempotent");
++      if (depth == 98) require(normalized.find("sim_sim_") == std::string::npos, "unbounded instance name prefix remains");
++    }
++    // Preserve explicitly referenced XDC roots, including aggregate/reference
++    // metadata: the writer must resolve the retained operation after inlining.
++    auto referenced = fixture(ctx, 4);
++    auto rc = *referenced->getOps<CircuitOp>().begin();
++    OpBuilder b(&ctx);
++    auto raw = rc->getAttrOfType<ArrayAttr>("rawAnnotations");
++    SmallVector<Attribute> annotations(raw.begin(), raw.end());
++    annotations.push_back(b.getDictionaryAttr({
++      b.getNamedAttr("class", b.getStringAttr(goldengate::AnnotationClasses::InternalXDC)),
++      b.getNamedAttr("destinationFile", b.getDictionaryAttr({b.getNamedAttr("class", b.getStringAttr(goldengate::AnnotationClasses::XDCSynthesis))})),
++      b.getNamedAttr("formatString", b.getStringAttr("reference:{}")),
++      b.getNamedAttr("argumentList", b.getArrayAttr({b.getStringAttr("~FPGATop|GGStage2Wrapper>in")}))}));
++    rc->setAttr("rawAnnotations", b.getArrayAttr(annotations));
++    require(succeeded(goldengate::normalizeHostHierarchy(*referenced, "/tmp/host-hierarchy-test.sv", count, error)) && count == 2, "explicit XDC root was inlined");
++    require(succeeded(goldengate::prepareXDCOutput(rc, error)), error);
++    bool resolved = false;
++    for (auto attr : rc->getAttrOfType<ArrayAttr>("rawAnnotations")) {
++      auto d = cast<DictionaryAttr>(attr); auto body = d.getAs<StringAttr>("fileBody");
++      resolved |= body && body.getValue().contains("reference:sim_sim/in");
++    }
++    require(resolved, "explicit XDC root did not follow the final hierarchy");
++    // Shared construction wrappers are ambiguous: reject rather than clone
++    // the helper state into a different number of instances.
++    auto shared = fixture(ctx, 3); auto sc = *shared->getOps<CircuitOp>().begin();
++    FModuleOp sharedTop;
++    for (auto m : sc.getOps<FModuleOp>()) if (m.getName() == "FPGATop") sharedTop = m;
++    auto sim = *sharedTop.getOps<InstanceOp>().begin();
++    b.setInsertionPointAfter(sim); auto copy = b.clone(*sim.getOperation());
++    copy->setAttr("name", b.getStringAttr("extra"));
++    auto sharedBefore = dump(*shared);
++    require(failed(goldengate::normalizeHostHierarchy(*shared, "/tmp/host-hierarchy-test.sv", count, error)) && dump(*shared) == sharedBefore, "shared wrapper rejection mutated source");
++    // A malformed boundary rejects atomically.
++    auto invalid = fixture(ctx, 3); auto c = *invalid->getOps<CircuitOp>().begin();
++    c->removeAttr("rawAnnotations"); auto before = dump(*invalid);
++    require(failed(goldengate::normalizeHostHierarchy(*invalid, "/tmp/host-hierarchy-test.sv", count, error)) && dump(*invalid) == before, "rejection mutated source");
++    llvm::outs() << "Host hierarchy depth 1/3/98, target preservation, bounded names, XDC references, idempotence and atomic rejections passed\n";
++    if (argc == 4) {
++      auto baseline = fixture(ctx, 98);
++      require(succeeded(goldengate::emitSimulatorRTL(*baseline, "fixture", std::string(argv[3]) + "/baseline.sv", error)), error);
++      require(succeeded(goldengate::normalizeHostHierarchy(*baseline, std::string(argv[3]) + "/collapsed.sv", count, error)), error);
++      require(succeeded(goldengate::emitSimulatorRTL(*baseline, "fixture", std::string(argv[3]) + "/collapsed.sv", error)), error);
++    }
++    if (argc >= 3) {
++      auto real = parseSourceFile<ModuleOp>(argv[1], &ctx);
++      require(bool(real), "real Rocket boundary parse");
++      require(succeeded(goldengate::normalizeHostHierarchy(*real, std::string(argv[2]) + "/FireSim-generated.sv", count, error)), error);
++      llvm::outs() << "Rocket inlined wrappers: " << count << '\n';
++      auto rc = *real->getOps<CircuitOp>().begin();
++      require(succeeded(goldengate::prepareXDCOutput(rc, error)), error);
++      require(succeeded(goldengate::emitOutputFiles(rc, argv[2], "FireSim-generated", error)), error);
++      std::error_code ec; llvm::raw_fd_ostream ir(std::string(argv[2]) + "/normalized.mlir", ec);
++      require(!ec, "normalized IR output"); real->print(ir); ir.close();
++      require(succeeded(goldengate::emitSimulatorRTL(*real, argv[1], std::string(argv[2]) + "/FireSim-generated.sv", error)), error);
++      llvm::outs() << "Rocket normalized IR, final XDC and RTL emission passed\n";
++    }
++    return 0;
++  } catch (const std::exception &e) { llvm::errs() << e.what() << '\n'; return 1; }
++}

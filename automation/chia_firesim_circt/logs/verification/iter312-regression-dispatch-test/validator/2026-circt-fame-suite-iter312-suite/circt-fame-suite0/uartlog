@@ -1,0 +1,24 @@
+CIRCT_FAME: BEGIN version=1 mask=2047
+FAME_TEST: integer BEGIN
+FAME_TEST: integer PASS checks=14785 signature=0x5966583a67c3c891
+FAME_TEST: memory BEGIN
+FAME_TEST: memory FAIL checks=58802 signature=0x518018b83a9391d8
+FAME_TEST: control BEGIN
+FAME_TEST: control PASS checks=2952 signature=0xd541265a2d172100
+FAME_TEST: atomics BEGIN
+FAME_TEST: atomics PASS checks=3556 signature=0x9450eeaf44a34f42
+FAME_TEST: csr BEGIN
+FAME_TEST: csr PASS checks=41 signature=0xa3cd2ce1fa447645
+FAME_TEST: traps BEGIN
+FAME_TEST: traps PASS checks=14 signature=0x3b3e60a814aeb478
+FAME_TEST: vm BEGIN
+FAME_TEST: vm PASS checks=1035 signature=0x8bef25aeb180f38a
+FAME_TEST: interrupts BEGIN
+FAME_TEST: interrupts PASS checks=3 signature=0xf0f27dae2528eb00
+FAME_TEST: fp BEGIN
+FAME_TEST: fp PASS checks=157 signature=0x47dce551ad063657
+FAME_TEST: icache BEGIN
+FAME_TEST: icache PASS checks=66 signature=0xedff6fafeda6c015
+FAME_TEST: workloads BEGIN
+FAME_TEST: workloads PASS checks=8730 signature=0xa82cc78695c2c95f
+CIRCT_FAME: PASS tests=11 checks=90141 failures=0 signature=0x78194504c338c229

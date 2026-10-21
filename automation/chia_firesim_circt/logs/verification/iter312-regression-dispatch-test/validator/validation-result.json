@@ -1,0 +1,15 @@
+{
+  "binary": "circt-fame-suite",
+  "suffix_tag": "iter312-suite",
+  "reference": "/scratch/jfx/fsim-circt/automation/chia_firesim_circt/workloads/circt-metasim-bare/spike-results/expected-results.json",
+  "differential": "portable Spike",
+  "failed_groups": [
+    "memory"
+  ],
+  "uartlog": "/scratch/jfx/fsim-circt/automation/chia_firesim_circt/logs/verification/iter312-regression-dispatch-test/validator/2026-circt-fame-suite-iter312-suite/circt-fame-suite0/uartlog",
+  "result_directory": "/scratch/jfx/fsim-circt/automation/chia_firesim_circt/logs/verification/iter312-regression-dispatch-test/validator/2026-circt-fame-suite-iter312-suite",
+  "elf_sha256": "cbe9167abf7518fd522f23946edc5911353e4b5ba6d367626d842a0c87aaac47",
+  "reference_sha256": "6dea6d5764012d95f79072492c9f149f1b9318ffa80537c7043e793f8dba3816",
+  "error": "failure or fatal marker present",
+  "returncode": 1
+}

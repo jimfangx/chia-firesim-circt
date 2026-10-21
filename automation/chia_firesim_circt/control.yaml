@@ -4,4 +4,4 @@
 # before each Codex iteration, so the next `codex exec resume` uses the new
 # model.  Use null to retain the `--model` submission argument (or the Codex
 # CLI default when that argument was omitted).
-model: gpt-6-sol
+model: gpt-6.1-sol

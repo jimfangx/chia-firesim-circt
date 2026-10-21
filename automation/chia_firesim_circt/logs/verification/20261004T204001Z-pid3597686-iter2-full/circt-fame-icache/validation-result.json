@@ -1,0 +1,24 @@
+{
+  "binary": "circt-fame-icache",
+  "suffix_tag": "20261004T204001Z-pid3597686-iter2-full-circt-fame-icache",
+  "reference": "/scratch/jfx/fsim-circt/automation/chia_firesim_circt/logs/regression-versions/6ece78ef718f4f735d61ecd788a563c8a794133049dc2a08931e910c0427afaf/spike-results/expected-results.json",
+  "differential": "portable Spike",
+  "failed_groups": [],
+  "uartlog": "/scratch/jfx/fsim-circt/sims/firesim/deploy/results-workload/2026-10-04--22-59-27-circt-fame-icache-20261004T204001Z-pid3597686-iter2-full-circt-fame-icache/circt-fame-icache0/uartlog",
+  "result_directory": "/scratch/jfx/fsim-circt/sims/firesim/deploy/results-workload/2026-10-04--22-59-27-circt-fame-icache-20261004T204001Z-pid3597686-iter2-full-circt-fame-icache",
+  "elf_sha256": "1b9daf69b3ffc89626ba1eac5b54a85dba1c3b243983d1195a765665b225e36f",
+  "reference_sha256": "6dea6d5764012d95f79072492c9f149f1b9318ffa80537c7043e793f8dba3816",
+  "result": {
+    "mask": 512,
+    "checks": 66,
+    "signature": "0x8a433b942f7e25db",
+    "tests": [
+      {
+        "name": "icache",
+        "checks": 66,
+        "signature": "0xedff6fafeda6c015"
+      }
+    ]
+  },
+  "returncode": 0
+}

@@ -1,0 +1,8 @@
+{
+  "benchmark_name": "circt-fame-traps",
+  "common_simulation_outputs": [
+    "uartlog"
+  ],
+  "common_bootbinary": "/scratch/jfx/fsim-circt/automation/chia_firesim_circt/workloads/circt-metasim-bare/circt-fame-traps",
+  "common_rootfs": "/scratch/jfx/fsim-circt/software/firemarshal/boards/default/installers/firesim/dummy.rootfs"
+}

@@ -1,0 +1,50 @@
+diff --git a/platforms/xilinx_alveo_u250/scripts/get_serial_dev_for_fpgas.tcl b/platforms/xilinx_alveo_u250/scripts/get_serial_dev_for_fpgas.tcl
+index c6da6024a..98b36e210 100644
+--- a/platforms/xilinx_alveo_u250/scripts/get_serial_dev_for_fpgas.tcl
++++ b/platforms/xilinx_alveo_u250/scripts/get_serial_dev_for_fpgas.tcl
+@@ -8,8 +8,10 @@ set_param labtools.enable_cs_server false
+ open_hw_manager
+ connect_hw_server -allow_non_jtag
+ 
+-# by default vivado opens a default hw target
+-close_hw_target
++# Vivado Lab may connect without selecting a target.
++if {[llength [current_hw_target -quiet]] > 0} {
++    close_hw_target
++}
+ 
+ foreach {hw_target} [get_hw_targets] {
+     open_hw_target $hw_target
+diff --git a/platforms/xilinx_alveo_u250/scripts/program_fpga.tcl b/platforms/xilinx_alveo_u250/scripts/program_fpga.tcl
+index 53b7a95f7..f8ffb0bde 100644
+--- a/platforms/xilinx_alveo_u250/scripts/program_fpga.tcl
++++ b/platforms/xilinx_alveo_u250/scripts/program_fpga.tcl
+@@ -40,8 +40,11 @@ set_param labtools.enable_cs_server false
+ open_hw_manager
+ connect_hw_server -allow_non_jtag
+ 
+-# by default vivado opens a default hw target
+-close_hw_target
++# Vivado Lab can connect without selecting a target. Only close an existing
++# current target; an unconditional close aborts before programming in that case.
++if {[llength [current_hw_target -quiet]] > 0} {
++    close_hw_target
++}
+ 
+ # check if serial is in hw targets
+ set final_hw_target ""
+diff --git a/platforms/xilinx_alveo_u250/scripts/util.py b/platforms/xilinx_alveo_u250/scripts/util.py
+index 190eedfcd..922b83446 100644
+--- a/platforms/xilinx_alveo_u250/scripts/util.py
++++ b/platforms/xilinx_alveo_u250/scripts/util.py
+@@ -7,7 +7,9 @@ def call_vivado(vivado: Path, args: List[str]) -> Tuple[int, str, str]:
+     pVivado = subprocess.Popen(
+         [
+             str(vivado),
+-            '-mode', 'tcl',
++            # Interactive Tcl mode can return zero after a sourced script fails
++            # and stdin reaches EOF. Batch mode propagates script errors.
++            '-mode', 'batch',
+         ] + args,
+         stdin=subprocess.DEVNULL,
+         stdout=subprocess.PIPE,

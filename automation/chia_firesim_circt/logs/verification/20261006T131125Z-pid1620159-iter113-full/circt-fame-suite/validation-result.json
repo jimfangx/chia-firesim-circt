@@ -1,0 +1,74 @@
+{
+  "binary": "circt-fame-suite",
+  "suffix_tag": "20261006T131125Z-pid1620159-iter113-full-circt-fame-suite",
+  "reference": "/scratch/jfx/fsim-circt/automation/chia_firesim_circt/logs/regression-versions/6ece78ef718f4f735d61ecd788a563c8a794133049dc2a08931e910c0427afaf/spike-results/expected-results.json",
+  "differential": "portable Spike",
+  "failed_groups": [],
+  "uartlog": "/scratch/jfx/fsim-circt/sims/firesim/deploy/results-workload/2026-10-11--13-04-24-circt-fame-suite-20261006T131125Z-pid1620159-iter113-full-circt-fame-suite/circt-fame-suite0/uartlog",
+  "result_directory": "/scratch/jfx/fsim-circt/sims/firesim/deploy/results-workload/2026-10-11--13-04-24-circt-fame-suite-20261006T131125Z-pid1620159-iter113-full-circt-fame-suite",
+  "elf_sha256": "cbe9167abf7518fd522f23946edc5911353e4b5ba6d367626d842a0c87aaac47",
+  "reference_sha256": "6dea6d5764012d95f79072492c9f149f1b9318ffa80537c7043e793f8dba3816",
+  "result": {
+    "mask": 2047,
+    "checks": 90141,
+    "signature": "0x78194504c338c229",
+    "tests": [
+      {
+        "name": "integer",
+        "checks": 14785,
+        "signature": "0x5966583a67c3c891"
+      },
+      {
+        "name": "memory",
+        "checks": 58802,
+        "signature": "0x518018b83a9391d8"
+      },
+      {
+        "name": "control",
+        "checks": 2952,
+        "signature": "0xd541265a2d172100"
+      },
+      {
+        "name": "atomics",
+        "checks": 3556,
+        "signature": "0x9450eeaf44a34f42"
+      },
+      {
+        "name": "csr",
+        "checks": 41,
+        "signature": "0xa3cd2ce1fa447645"
+      },
+      {
+        "name": "traps",
+        "checks": 14,
+        "signature": "0x3b3e60a814aeb478"
+      },
+      {
+        "name": "vm",
+        "checks": 1035,
+        "signature": "0x8bef25aeb180f38a"
+      },
+      {
+        "name": "interrupts",
+        "checks": 3,
+        "signature": "0xf0f27dae2528eb00"
+      },
+      {
+        "name": "fp",
+        "checks": 157,
+        "signature": "0x47dce551ad063657"
+      },
+      {
+        "name": "icache",
+        "checks": 66,
+        "signature": "0xedff6fafeda6c015"
+      },
+      {
+        "name": "workloads",
+        "checks": 8730,
+        "signature": "0xa82cc78695c2c95f"
+      }
+    ]
+  },
+  "returncode": 0
+}

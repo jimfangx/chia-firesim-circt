@@ -1,0 +1,78 @@
+{
+  "binary": "circt-fame-rocket-suite",
+  "suffix_tag": "20261006T131125Z-pid1620159-iter37-full-circt-fame-rocket-suite",
+  "reference": null,
+  "differential": "pending SFC UART-bearing baseline",
+  "failed_groups": [],
+  "uartlog": "/scratch/jfx/fsim-circt/sims/firesim/deploy/results-workload/2026-10-07--23-02-50-circt-fame-rocket-suite-20261006T131125Z-pid1620159-iter37-full-circt-fame-rocket-suite/circt-fame-rocket-suite0/uartlog",
+  "result_directory": "/scratch/jfx/fsim-circt/sims/firesim/deploy/results-workload/2026-10-07--23-02-50-circt-fame-rocket-suite-20261006T131125Z-pid1620159-iter37-full-circt-fame-rocket-suite",
+  "elf_sha256": "f1d92c2748fa54ce280db716ac78a8195202ff781e1a3ce48692af347071a038",
+  "result": {
+    "mask": 4095,
+    "checks": 90805,
+    "signature": "0x5f3744639d41ea35",
+    "tests": [
+      {
+        "name": "integer",
+        "checks": 14785,
+        "signature": "0x5966583a67c3c891"
+      },
+      {
+        "name": "memory",
+        "checks": 58802,
+        "signature": "0x518018b83a9391d8"
+      },
+      {
+        "name": "control",
+        "checks": 2952,
+        "signature": "0xd541265a2d172100"
+      },
+      {
+        "name": "atomics",
+        "checks": 3556,
+        "signature": "0x9450eeaf44a34f42"
+      },
+      {
+        "name": "csr",
+        "checks": 41,
+        "signature": "0xa3cd2ce1fa447645"
+      },
+      {
+        "name": "traps",
+        "checks": 14,
+        "signature": "0x3b3e60a814aeb478"
+      },
+      {
+        "name": "vm",
+        "checks": 1035,
+        "signature": "0x8bef25aeb180f38a"
+      },
+      {
+        "name": "interrupts",
+        "checks": 3,
+        "signature": "0xf0f27dae2528eb00"
+      },
+      {
+        "name": "fp",
+        "checks": 157,
+        "signature": "0x47dce551ad063657"
+      },
+      {
+        "name": "icache",
+        "checks": 66,
+        "signature": "0xedff6fafeda6c015"
+      },
+      {
+        "name": "workloads",
+        "checks": 8730,
+        "signature": "0xa82cc78695c2c95f"
+      },
+      {
+        "name": "uart",
+        "checks": 664,
+        "signature": "0xc89c0ca1a567dc96"
+      }
+    ]
+  },
+  "returncode": 0
+}
