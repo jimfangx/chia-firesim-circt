@@ -85,6 +85,27 @@ The seven bounded feature representatives and exact compiler flags live in
 `GOLDENGATE_CIRCT_BUILD_DIR` for other locations. Its default output is
 `.local/goldengate-circt-build/`; it imposes no CPU-affinity or memory limits.
 
+### Production artifacts and regression tests
+
+Production make and the default compiler helper configure `BUILD_TESTING=OFF`
+and build only `goldengate-circt`. Sources such as
+`test/Transforms/NICMultiMMIOTest.cpp` are regression tests: they are not linked
+into the compiler or FPGA driver and are not required on a deployment host.
+Keep these tests with the implementation in Git for CI and development.
+
+Build and run the separate test configuration explicitly:
+
+```sh
+cd "$CY_DIR"
+./scripts/build-goldengate-circt.sh --with-tests
+ctest --test-dir "$CY_DIR/.local/goldengate-circt-tests" --output-on-failure
+```
+
+This uses `.local/goldengate-circt-tests/` with `BUILD_TESTING=ON`; it does not
+populate the production build with test executables. Deploy the built compiler
+and the applicable FireSim driver/runtime dependencies, not the source checkout
+or its test-build directory.
+
 ## Rebuild Linux and the feature guests
 
 ```sh
