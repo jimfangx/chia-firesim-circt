@@ -60,8 +60,7 @@ make -j"$(getconf _NPROCESSORS_ONLN)" compile \
   PLATFORM=f2 TARGET_PROJECT=firesim \
   TARGET_PROJECT_MAKEFRAG="$CY_DIR/generators/firechip/chip/src/main/makefrag/firesim" \
   DESIGN=FireSim TARGET_CONFIG=FireSimCIRCTInstrumentedRocketConfig \
-  PLATFORM_CONFIG=WithAutoCounter_WithPrintfSynthesis_BaseF2Config \
-  GOLDENGATE_COMPILER=circt
+  PLATFORM_CONFIG=WithAutoCounter_WithPrintfSynthesis_BaseF2Config
 ```
 
 On F2, source **`./sourceme-manager.sh` without `--skip-ssh-setup`**. Complete SSH
@@ -69,7 +68,10 @@ initialization and make the intended FireSim key available before manager runs.
 The production make rules build target and compiler JARs from pinned sources;
 the old host's private prebuilt JARs and `/scratch/jfx` paths are not needed to
 compile this example. The native compiler is built from checked-in C++ sources.
-Use `GOLDENGATE_COMPILER=sfc` and a separate `GENERATED_DIR` for the Scala flow.
+Normal FireSim builds require CIRCT, including `firesim buildbitstream`, driver
+builds and direct RTL builds. The manager explicitly selects CIRCT, and the make
+rules reject SFC selection. Separate golden-reference tools invoke Scala SFC
+directly for comparisons.
 
 The seven bounded feature representatives and exact compiler flags live in
 `automation/chia_firesim_circt/feature_cases.yaml`:
@@ -142,6 +144,17 @@ poweroff and run-farm cleanup on November 9, 2026, alongside exactly four
 baseline static comparisons (Rocket, MegaBoomV3, plain Shuttle and Saturn
 Shuttle). Runtime checks are documented in
 `automation/chia_firesim_circt/feature_workloads/runtime_coverage.md`.
+
+The November 10 compiler optimizations reproduced the saved outputs for all four
+baselines and seven feature configurations: 2,229 files matched exactly, and 11
+file lists differed only by their output-directory prefix. The normal manager
+path also regenerated matching Rocket RTL and compiler collateral, linked the
+F2 driver and staged the FPGA files. See
+`reproducibility/compiler-update-20261110.json` for compiler/commit identities and
+the bounded checks. These checks reused the existing hardware results; they did
+not launch new bitstream builds, FPGA runs or formal proofs. The earlier
+`validated-source-manifest.json` retains its original hardware-validated source
+and compiler identity as historical evidence.
 
 These results do not establish full behavioral equivalence or complete port
 signoff. Jasper LEC/SEC, matched enabled-feature SFC comparisons and current
