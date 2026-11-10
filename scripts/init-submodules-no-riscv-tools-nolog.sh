@@ -24,7 +24,7 @@ error_handler() {
 }
 
 # Set the trap for catching errors - call the error_handler and pass in the line number on any non-zero exit status
-trap 'error_handler $LINENO "$submodule_name"' ERR
+trap 'error_handler "$LINENO" "${submodule_name:-}"' ERR
 
 function usage
 {
@@ -292,6 +292,9 @@ cd "$RDIR"
     if [[ "$ENABLE_GEMMINI" -eq 1 ]] ; then
         submodule_name="generators/gemmini"
         git submodule update --init generators/gemmini || exit 1
+        # Existing clones may retain an obsolete nested URL (for example,
+        # ibm/rocc-software) in .git/config even after .gitmodules is fixed.
+        git -C generators/gemmini submodule sync --recursive software/gemmini-rocc-tests || exit 1
         git -C generators/gemmini/ submodule update --init --recursive software/gemmini-rocc-tests || exit 1
     fi
 
