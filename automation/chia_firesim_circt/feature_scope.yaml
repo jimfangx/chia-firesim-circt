@@ -1,0 +1,99 @@
+# Required port capabilities beyond the fixed four baseline recipes.
+# These are bounded feature cases, not an enumeration of build recipes. Cases
+# may share one enabled image when its manifest and checks exercise each feature.
+# Every feature needs matched-input SFC syntax/semantic comparison, Jasper LEC
+# and SEC, and F2 Linux boot-to-poweroff with feature-specific runtime checks.
+# Every representative case is Linux-capable and requires all four stages.
+# Supporting cases guide focused tests; they cannot replace representative cases.
+# Baseline Linux success, compilation alone, disabled annotations, and diagnostic
+# helper passes cannot substitute for enabled production-pipeline evidence.
+# Evidence stays empty here: put proof/runtime receipts in separate case manifests
+# under feature_evidence_root/<currentidentity>/<feature>/*.json. Each manifest
+# binds capability IDs, enabled features, configuration/RTL hashes and current
+# semantic/LEC/SEC/Linux reports. Never add proof hashes to this hashed registry.
+# Partition/QSFP support is deferred and is not a required feature here.
+schema_version: 1
+features:
+  fame5:
+    required: true
+    # Enable threading in the production pipeline, not just candidate labeling.
+    # Record repeated selected instances, grouping and shared hardware/thread count.
+    # Compare per-thread register/reset/enable/init and memory depth/masks/ports/
+    # latency/read-under-write behavior; stall threads independently and check for
+    # state/token leakage. Compiler CPU parallelism does not exercise FAME-5.
+    capabilities:
+      - production_threading_enablement
+      - grouping_analysis
+      - independent_register_state
+      - independent_threaded_memories
+      - thread_scheduler_channel_mux_demux
+      - shared_hardware_thread_count
+    representative_cases:
+      - threaded_repeated_model_linux_all_threads_exercised
+    supporting_cases:
+      - two_thread_counter_or_fsm_against_replicated_fame1
+      - four_thread_accumulator_independent_stalls_and_reset
+      - threaded_masked_memory_non_power_of_two_geometry
+    evidence: []
+  autocounter_print:
+    required: true
+    # Keep AutoCounter and Print enabled through production transformation,
+    # widget construction, final RTL and driver execution. Check nonempty CSV
+    # samples and expected prints, including rollover, triggers, resets, payload
+    # formatting/order and backpressure; inspect MMIO/stream/header consistency.
+    # Reuse the existing AutoCounter/Printf examples as bounded SFC oracles.
+    capabilities:
+      - production_autocounter_print_enablement
+      - counter_sampling_rollover_reset
+      - print_payload_format_order
+      - trigger_reset_backpressure
+      - widget_mmio_stream_driver_abi
+      - checked_counter_and_print_runtime_output
+    representative_cases:
+      - enabled_autocounter_and_print_linux_checked_csv_and_prints
+    supporting_cases:
+      - enabled_counter_printf_triggers_rollover_and_backpressure
+    evidence: []
+  multiclock_models:
+    required: true
+    # Exercise at least two real domains and transformed models. Preserve rational
+    # ratios/phases, clock tokens and reset ownership; check dependency/fanout and
+    # independent stalls across stateful/combinational/memory models without a
+    # single-Rocket assumption. Emit metadata and observe runtime domain activity.
+    capabilities:
+      - rational_multiclock_phase_and_reset
+      - multidomain_clock_token_delivery
+      - generalized_model_dependency_and_fanout
+      - stateful_combinational_memory_model_semantics
+      - independent_domain_channel_stalls
+      - checked_multidomain_multimodel_runtime_activity
+    representative_cases:
+      - multiclock_multimodel_linux_checked_domain_activity
+    supporting_cases:
+      - two_domain_rational_clocks_communicating_models_and_fanout
+      - memory_model_distinct_latency_or_masks
+    evidence: []
+  nic:
+    required: true
+    # Check normal bidirectional packets/backpressure and independent two-widget
+    # indices, streams, MMIO, runtime options and traffic. Compile-time LoopbackNIC
+    # (SimpleNICBridge.scala) and per-widget runtime +nic-loopbackN (simplenic.cc)
+    # are distinct SFC APIs: cover both, reusing images for runtime-only options.
+    # Linux must exchange checked packets in each selected mode before poweroff;
+    # idle widgets or an ordinary no-NIC boot do not establish NIC coverage.
+    capabilities:
+      - normal_bidirectional_packet_tokens_and_backpressure
+      - nic_mmio_stream_driver_abi
+      - multiple_independent_nic_widgets
+      - compile_time_loopback_nic
+      - runtime_per_widget_nic_loopback
+      - checked_packet_runtime_traffic
+    representative_cases:
+      - normal_single_nic_linux_bidirectional_packet_checks
+      - two_nic_linux_independent_concurrent_traffic
+      - compile_time_loopback_nic_linux_packet_checks
+      - runtime_per_widget_nic_loopback_linux_packet_checks
+    supporting_cases:
+      - nic_packet_adapter_token_queue_backpressure_and_reset
+      - two_widget_mmio_stream_index_isolation
+    evidence: []

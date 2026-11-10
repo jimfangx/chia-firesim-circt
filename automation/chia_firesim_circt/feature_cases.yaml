@@ -1,0 +1,47 @@
+# Runnable adapter inputs for exactly the representatives declared in feature_scope.
+# Compilation/runtime failures remain failures; no acceptance claims live here.
+schema_version: 1
+cases:
+  threaded_repeated_model_linux_all_threads_exercised:
+    feature: fame5
+    target_config: FireSimCIRCTThreadedQuadRocketConfig
+    platform_config: MTModels_WithAutoCounter_WithPrintfSynthesis_BaseF2Config
+    workload: threads
+    threads: 4
+  enabled_autocounter_and_print_linux_checked_csv_and_prints:
+    feature: autocounter_print
+    target_config: FireSimCIRCTInstrumentedRocketConfig
+    platform_config: WithAutoCounter_WithPrintfSynthesis_BaseF2Config
+    workload: instrumentation
+  multiclock_multimodel_linux_checked_domain_activity:
+    feature: multiclock_models
+    target_config: FireSimCIRCTMulticlockRocketConfig
+    platform_config: MTModels_WithAutoCounter_WithPrintfSynthesis_BaseF2Config
+    workload: instrumentation
+    min_domains: 2
+    min_models: 2
+  normal_single_nic_linux_bidirectional_packet_checks:
+    feature: nic
+    target_config: FireSimCIRCTNICRocketConfig
+    platform_config: BaseF2Config
+    workload: nic
+    nic_modes: [normal]
+  two_nic_linux_independent_concurrent_traffic:
+    feature: nic
+    target_config: FireSimCIRCTTwoNICRocketConfig
+    platform_config: BaseF2Config
+    workload: nic
+    nic_modes: [normal, normal]
+  compile_time_loopback_nic_linux_packet_checks:
+    feature: nic
+    target_config: FireSimCIRCTNICRocketConfig
+    platform_config: BaseF2Config
+    workload: nic
+    nic_modes: [compile_time_loopback]
+    compiler_flags: [--nic-mode=loopback]
+  runtime_per_widget_nic_loopback_linux_packet_checks:
+    feature: nic
+    target_config: FireSimCIRCTTwoNICRocketConfig
+    platform_config: BaseF2Config
+    workload: nic
+    nic_modes: [normal, runtime_loopback]

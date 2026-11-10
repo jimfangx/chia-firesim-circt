@@ -305,7 +305,7 @@ if run_step "6"; then
         pushd $CYDIR/sims/firesim &&
         (
             set -e # Subshells un-set "set -e" so it must be re enabled
-            source sourceme-manager.sh --skip-ssh-setup
+            source sourceme-manager.sh
             pushd sim
             # avoid directly building classpath s.t. target-injected files can be recompiled
             make sbt SBT_COMMAND="compile"

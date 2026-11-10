@@ -383,3 +383,33 @@ class CTCFireSimConfig extends Config(
 )
 
 
+
+// Bounded CIRCT port representatives. Existing baseline configurations are unchanged.
+class WithCIRCTFeatureChecks extends Config((site, here, up) => {
+  case FireSimFeatureChecks => true
+})
+
+// Use the production FASED 35-bit memory profile for bounded Linux feature runs.
+// The largest representative has four logical CPUs; workloads bound written
+// buffers and packet counts independently of this physical DRAM aperture.
+class WithCIRCTFeatureBounds extends Config(
+  new freechips.rocketchip.subsystem.WithExtMemSize(BigInt(16) << 30))
+
+class FireSimCIRCTInstrumentedRocketConfig extends Config(
+  new WithCIRCTFeatureBounds ++ new WithCIRCTFeatureChecks ++ new FireSimRocketConfig)
+
+class FireSimCIRCTThreadedQuadRocketConfig extends Config(
+  new WithCIRCTFeatureBounds ++ new WithCIRCTFeatureChecks ++ new FireSimQuadRocketConfig)
+
+class FireSimCIRCTMulticlockRocketConfig extends Config(
+  new WithCIRCTFeatureBounds ++
+  new WithCIRCTFeatureChecks ++
+  new WithDefaultFireSimBridges ++
+  new WithFireSimTestChipConfigTweaks ++
+  new chipyard.RocketConfig)
+
+class FireSimCIRCTNICRocketConfig extends Config(
+  new WithCIRCTFeatureBounds ++ new WithNIC ++ new FireSimRocketConfig)
+
+class FireSimCIRCTTwoNICRocketConfig extends Config(
+  new icenet.WithTwoIceNIC ++ new FireSimCIRCTNICRocketConfig)

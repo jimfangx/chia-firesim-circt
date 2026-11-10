@@ -1,0 +1,246 @@
+{
+  "scope": "Expected values captured from matching actual SFC/native boundary traces; no compiler-whole-design or formal acceptance claim",
+  "source_evidence_sha256": "3d99e6fa67d2ffc31d27f6cba6002974017e36c889de1f0a07d2934c074067ce",
+  "cases": [
+    {
+      "reset_base_cycles": 49,
+      "multiplier": 1,
+      "divisor": 1,
+      "expected": {
+        "reset_cycles": 49,
+        "masked_source_tokens": 49,
+        "first_print_cycle": 0
+      }
+    },
+    {
+      "reset_base_cycles": 49,
+      "multiplier": 1,
+      "divisor": 2,
+      "expected": {
+        "reset_cycles": 25,
+        "masked_source_tokens": 25,
+        "first_print_cycle": 0
+      }
+    },
+    {
+      "reset_base_cycles": 49,
+      "multiplier": 1,
+      "divisor": 3,
+      "expected": {
+        "reset_cycles": 17,
+        "masked_source_tokens": 17,
+        "first_print_cycle": 0
+      }
+    },
+    {
+      "reset_base_cycles": 49,
+      "multiplier": 1,
+      "divisor": 4,
+      "expected": {
+        "reset_cycles": 13,
+        "masked_source_tokens": 13,
+        "first_print_cycle": 0
+      }
+    },
+    {
+      "reset_base_cycles": 49,
+      "multiplier": 2,
+      "divisor": 3,
+      "expected": {
+        "reset_cycles": 33,
+        "masked_source_tokens": 33,
+        "first_print_cycle": 0
+      }
+    },
+    {
+      "reset_base_cycles": 49,
+      "multiplier": 2,
+      "divisor": 5,
+      "expected": {
+        "reset_cycles": 20,
+        "masked_source_tokens": 21,
+        "first_print_cycle": 1048576
+      }
+    },
+    {
+      "reset_base_cycles": 49,
+      "multiplier": 3,
+      "divisor": 4,
+      "expected": {
+        "reset_cycles": 37,
+        "masked_source_tokens": 37,
+        "first_print_cycle": 0
+      }
+    },
+    {
+      "reset_base_cycles": 49,
+      "multiplier": 3,
+      "divisor": 5,
+      "expected": {
+        "reset_cycles": 29,
+        "masked_source_tokens": 30,
+        "first_print_cycle": 1048576
+      }
+    },
+    {
+      "reset_base_cycles": 50,
+      "multiplier": 1,
+      "divisor": 1,
+      "expected": {
+        "reset_cycles": 50,
+        "masked_source_tokens": 50,
+        "first_print_cycle": 0
+      }
+    },
+    {
+      "reset_base_cycles": 50,
+      "multiplier": 1,
+      "divisor": 2,
+      "expected": {
+        "reset_cycles": 25,
+        "masked_source_tokens": 26,
+        "first_print_cycle": 1048576
+      }
+    },
+    {
+      "reset_base_cycles": 50,
+      "multiplier": 1,
+      "divisor": 3,
+      "expected": {
+        "reset_cycles": 17,
+        "masked_source_tokens": 18,
+        "first_print_cycle": 1048576
+      }
+    },
+    {
+      "reset_base_cycles": 50,
+      "multiplier": 1,
+      "divisor": 4,
+      "expected": {
+        "reset_cycles": 13,
+        "masked_source_tokens": 14,
+        "first_print_cycle": 1048576
+      }
+    },
+    {
+      "reset_base_cycles": 50,
+      "multiplier": 2,
+      "divisor": 3,
+      "expected": {
+        "reset_cycles": 33,
+        "masked_source_tokens": 34,
+        "first_print_cycle": 1048576
+      }
+    },
+    {
+      "reset_base_cycles": 50,
+      "multiplier": 2,
+      "divisor": 5,
+      "expected": {
+        "reset_cycles": 20,
+        "masked_source_tokens": 21,
+        "first_print_cycle": 1048576
+      }
+    },
+    {
+      "reset_base_cycles": 50,
+      "multiplier": 3,
+      "divisor": 4,
+      "expected": {
+        "reset_cycles": 37,
+        "masked_source_tokens": 38,
+        "first_print_cycle": 1048576
+      }
+    },
+    {
+      "reset_base_cycles": 50,
+      "multiplier": 3,
+      "divisor": 5,
+      "expected": {
+        "reset_cycles": 30,
+        "masked_source_tokens": 31,
+        "first_print_cycle": 1048576
+      }
+    },
+    {
+      "reset_base_cycles": 51,
+      "multiplier": 1,
+      "divisor": 1,
+      "expected": {
+        "reset_cycles": 51,
+        "masked_source_tokens": 51,
+        "first_print_cycle": 0
+      }
+    },
+    {
+      "reset_base_cycles": 51,
+      "multiplier": 1,
+      "divisor": 2,
+      "expected": {
+        "reset_cycles": 26,
+        "masked_source_tokens": 26,
+        "first_print_cycle": 0
+      }
+    },
+    {
+      "reset_base_cycles": 51,
+      "multiplier": 1,
+      "divisor": 3,
+      "expected": {
+        "reset_cycles": 17,
+        "masked_source_tokens": 18,
+        "first_print_cycle": 1048576
+      }
+    },
+    {
+      "reset_base_cycles": 51,
+      "multiplier": 1,
+      "divisor": 4,
+      "expected": {
+        "reset_cycles": 13,
+        "masked_source_tokens": 14,
+        "first_print_cycle": 1048576
+      }
+    },
+    {
+      "reset_base_cycles": 51,
+      "multiplier": 2,
+      "divisor": 3,
+      "expected": {
+        "reset_cycles": 34,
+        "masked_source_tokens": 35,
+        "first_print_cycle": 1048576
+      }
+    },
+    {
+      "reset_base_cycles": 51,
+      "multiplier": 2,
+      "divisor": 5,
+      "expected": {
+        "reset_cycles": 21,
+        "masked_source_tokens": 21,
+        "first_print_cycle": 0
+      }
+    },
+    {
+      "reset_base_cycles": 51,
+      "multiplier": 3,
+      "divisor": 4,
+      "expected": {
+        "reset_cycles": 38,
+        "masked_source_tokens": 39,
+        "first_print_cycle": 1048576
+      }
+    },
+    {
+      "reset_base_cycles": 51,
+      "multiplier": 3,
+      "divisor": 5,
+      "expected": {
+        "reset_cycles": 31,
+        "masked_source_tokens": 31,
+        "first_print_cycle": 0
+      }
+    }
+  ]
+}

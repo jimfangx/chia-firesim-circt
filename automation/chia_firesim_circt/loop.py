@@ -18,6 +18,7 @@ import runpy
 import selectors
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -29,11 +30,11 @@ from pathlib import Path
 import ray
 import yaml
 from chia.base.ChiaFunction import ChiaFunction, get
-from chia.models.codex import CodexLLM, CodexQueryResult, parse_session_id
+from chia.models.codex import CodexLLM, CodexQueryResult, InvalidRequestError, parse_session_id
 from chia.trace.profiler import start_collector
 
 
-REPO = Path("/scratch/jfx/fsim-circt")
+REPO = Path(__file__).resolve().parents[2]
 DEPLOY = REPO / "sims/firesim/deploy"
 AUTOMATION = REPO / "automation/chia_firesim_circt"
 FIREMARSHAL = REPO / "software/firemarshal"
@@ -45,11 +46,67 @@ REGRESSION_ROOT = AUTOMATION / "workloads/circt-metasim-bare"
 REGRESSION_GROUPS = ("integer", "memory", "control", "atomics", "csr", "traps", "vm",
                      "interrupts", "fp", "icache", "workloads", "uart")
 RECIPE = "circt_u250_firesim_rocket_singlecore"
-MANAGER_ENV = "cd /scratch/jfx/fsim-circt/sims/firesim && source ./sourceme-manager.sh --skip-ssh-setup"
+MANAGER_ENV = 'source "${CONDA_EXE%/bin/conda}/etc/profile.d/conda.sh" && cd ' + shlex.quote(str(REPO / "sims/firesim")) + ' && source ./sourceme-manager.sh'
 METASIM_RUNTIME = DEPLOY / "config_runtime_metasim.yaml"
 LIVE_CONTROL = AUTOMATION / "control.yaml"
 FIRESIM_LOG_RE = re.compile(r"The full log of this run is:\s*(?P<path>\S+)")
 GOAL_COMPLETE_RE = re.compile(r"^LOOP_COMPLETE:\s*yes\s*$", re.IGNORECASE | re.MULTILINE)
+FEATURE_READY_RE = re.compile(r"^FEATURE_IMPLEMENTATION_COMPLETE:\s*yes\s*$", re.IGNORECASE | re.MULTILINE)
+FEEDBACK_MAX_CHARS = 96_000
+PROMPT_MAX_CHARS = 200_000
+
+
+def _bounded_text(value: object, limit: int) -> str:
+    text = value if isinstance(value, str) else str(value)
+    if len(text) <= limit:
+        return text
+    marker = f"\n[omitted {len(text) - limit} characters; read the evidence file]\n"
+    keep = limit - len(marker)
+    return text[:keep // 2] + marker + text[-(keep - keep // 2):]
+
+
+def _verification_feedback(reports: list[dict], graph_path: Path) -> str:
+    """Give the agent bounded status/diagnostics, never nested RTL inventories."""
+    def brief(item):
+        row = {key: _bounded_text(item[key], 1600) for key in (
+            "node", "target", "mode", "status", "reason", "error", "evidence", "identity"
+        ) if key in item}
+        if "ok" in item:
+            row["ok"] = item["ok"] is True
+        result = item.get("result", {})
+        if isinstance(result, dict):
+            row["adapter"] = {key: _bounded_text(result[key], 1600) for key in (
+                "verification_stage", "stage", "error", "proof_status"
+            ) if key in result}
+            for key in ("passed", "syntax", "semantic", "static_semantics"):
+                if key in result:
+                    row["adapter"][key] = result[key] is True
+            if result.get("unresolved_obligations"):
+                row["adapter"]["unresolved_obligations"] = _bounded_text(
+                    result["unresolved_obligations"], 3000)
+        command = item.get("command", {})
+        if isinstance(command, dict):
+            row["command"] = {key: _bounded_text(command[key], 1600) for key in (
+                "returncode", "stdout", "stderr", "report"
+            ) if key in command}
+        return row
+
+    nodes = []
+    for report in reports[:8]:
+        node = brief(report)
+        node["details"] = [brief(detail) for detail in report.get("details", [])[:16]
+                           if isinstance(detail, dict)]
+        nodes.append(node)
+    return _bounded_text(
+        f"Full verification report: {graph_path}\n"
+        "Read the referenced reports/logs for full diagnostics; inventories and tool output are kept on disk.\n"
+        + json.dumps(nodes, indent=2), FEEDBACK_MAX_CHARS)
+
+
+class SessionWriterConflict(InvalidRequestError):
+    """A live Codex session/call cannot be resumed by another writer."""
+
+    error_type = "session_writer_conflict"
 
 
 class StreamingCodexLLM(CodexLLM):
@@ -59,16 +116,69 @@ class StreamingCodexLLM(CodexLLM):
     with ``subprocess.run`` and creates its transcript after the CLI exits.
     This loop runs for hours, so make the transcript durable at dispatch time
     and append every stdout/stderr line immediately.  The final result still
-    uses the stock parser, preserving retries, error classification, and
-    resumable-session handling in ``CodexLLM.prompt``.
+    uses the stock parser. This shared-checkout worker resumes by session ID
+    only: it must never restore snapshots over the live shared Codex database.
     """
 
+    def _restore_session_state(self) -> None:
+        # Chia's portable backend restores SQLite/WAL/SHM and rollout snapshots.
+        # They are already on this worker's shared disk, potentially in use by
+        # other Codex clients. Never overwrite them with an earlier snapshot.
+        self._session_state = None
+        self._session_state_paths = ()
+
+    def _capture_session_state(self, cli: CodexQueryResult) -> None:
+        self._session_state = cli.session_state = None
+        self._session_state_paths = cli.session_state_paths = ()
+        cli.session_id = self._session_id
+
+    def _sync_session(self, cli: CodexQueryResult) -> CodexQueryResult:
+        if self._resume_session and cli.session_id:
+            self._session_id = cli.session_id
+        # Discard any old portable state too, including on deserialized agents.
+        self._session_state = cli.session_state = None
+        self._session_state_paths = cli.session_state_paths = ()
+        self._call_counter += 1
+        return cli
+
+    def _classify_error(self, cli: CodexQueryResult) -> None:
+        # The installed backend matches bare numeric HTTP codes anywhere in
+        # stderr, including "402" in timestamps. Detect this failure first and
+        # make it non-retryable via the backend's InvalidRequestError handling.
+        if cli.returncode != 0 and any(token in cli.stderr.lower() for token in (
+            "thread-store conflict", "already has an active writer",
+        )):
+            raise SessionWriterConflict(
+                node_id=self._get_node_id(), exit_code=cli.returncode,
+                raw_message=cli.stderr[:2000],
+            )
+        super()._classify_error(cli)
+
     def _run_codex(self, user_message: str, tools=None) -> CodexQueryResult:
+        # The driver owns .loop.lock; a worker-side lock also protects against a
+        # still-running task after its driver died or an accidental duplicate
+        # dispatch. Internal Codex subagents remain unrestricted by this lock.
+        with (AUTOMATION / ".codex-exec.lock").open("a") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise SessionWriterConflict(
+                    node_id=self._get_node_id(), exit_code=1,
+                    raw_message="Another CHIA implementation call owns this checkout; wait for it to exit.",
+                )
+            return self._run_codex_streamed(user_message, tools)
+
+    def _run_codex_streamed(self, user_message: str, tools=None) -> CodexQueryResult:
+        formatted_prompt = self._format_prompt(user_message)
+        if len(formatted_prompt) > PROMPT_MAX_CHARS:
+            raise ValueError(f"Implementation prompt exceeds local {PROMPT_MAX_CHARS}-character budget; "
+                             "move verbose content into evidence files before dispatch")
         fd, output_path = tempfile.mkstemp(suffix=".txt")
         os.close(fd)
         transcript_path = Path(f"{self._log_prefix}.log") if self._log_prefix else None
         stdout_parts: list[str] = []
         stderr_parts: list[str] = []
+        process = None
         try:
             if transcript_path is not None:
                 transcript_path.parent.mkdir(parents=True, exist_ok=True)
@@ -100,12 +210,13 @@ class StreamingCodexLLM(CodexLLM):
                     cwd=self.work_dir or None,
                     env=os.environ.copy(),
                     errors="replace",
+                    start_new_session=True,
                 )
                 assert process.stdin is not None
                 assert process.stdout is not None
                 assert process.stderr is not None
                 try:
-                    process.stdin.write(self._format_prompt(user_message))
+                    process.stdin.write(formatted_prompt)
                     process.stdin.close()
                 except BrokenPipeError:
                     pass
@@ -117,9 +228,14 @@ class StreamingCodexLLM(CodexLLM):
                 timed_out = False
                 try:
                     while streams.get_map():
-                        if time.monotonic() >= deadline:
+                        if not timed_out and time.monotonic() >= deadline:
                             timed_out = True
-                            process.kill()
+                            # Include descendant tool/agent processes, which
+                            # otherwise can outlive the CLI and retain a writer.
+                            try:
+                                os.killpg(process.pid, signal.SIGKILL)
+                            except ProcessLookupError:
+                                pass
                         for key, _ in streams.select(timeout=0.5):
                             line = key.fileobj.readline()
                             if not line:
@@ -182,6 +298,12 @@ class StreamingCodexLLM(CodexLLM):
                 if transcript is not None:
                     transcript.close()
         finally:
+            if process is not None and process.poll() is None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait()
             try:
                 os.unlink(output_path)
             except FileNotFoundError:
@@ -648,33 +770,255 @@ def _verify_with_firesim(
     return results
 
 
-def _agent_prompt(previous_verification: str, iteration: int, total: int, model: str | None) -> str:
-    return f"""You are the implementation agent for the FireSim Golden Gate Scala-FIRRTL Compiler to CIRCT migration.
+def _agent_prompt(previous_verification: str, iteration: int, total: int, model: str | None,
+                  phase: str = "full", readiness_path: Path | None = None) -> str:
+    if phase == "feature-implementation":
+        return _feature_implementation_prompt(previous_verification, iteration, total, model, readiness_path)
+    if phase == "nic-repair":
+        return _nic_repair_prompt(previous_verification, iteration, total, model)
+    if phase == "feature-linux-repair":
+        return _feature_linux_repair_prompt(previous_verification, iteration, total, model)
+    return f"""You are the main implementation agent for the FireSim Golden Gate SFC-to-CIRCT port.
 
-You may read, create, modify, and delete files under {REPO}; keep every source change inside that repository. You are running through the authenticated local Codex CLI: do not use OpenAI APIs or API keys. You may create a well-justified git checkpoint and push it to the configured GitHub remote when the worktree has a coherent, tested milestone; never push unrelated pre-existing changes.
+Read FIRESIM_CIRCT_PORT_PLAN.md at the beginning of every turn, inspect current sources and git status, and preserve unrelated shared-worktree edits and immutable SFC goldens. Work inside {REPO}; the Scala compiler under sims/firesim/sim/midas is the semantic oracle, and sims/firesim/sim/goldengate-circt plus its direct build wiring are the implementation. Focus on real compiler progress. Minimal verification adapters are in scope when needed to unblock the current compiler change; harness work alone does not establish compiler parity.
 
-This is a live shared worktree. At the beginning of every turn, reread `FIRESIM_CIRCT_PORT_PLAN.md`, paying special attention to any ADDITIONS or CHANGES to the plan, including the new notes at the top. Run `git status --short`, and inspect current compiler sources. Do not assume resumed context is current, reset/revert user changes, or overwrite the immutable SFC fixtures named in the plan.
+Current goals supersede the old 13-target U250 matrix and repeated Rocket streak:
+1. Correctness for exactly FOUR fixed targets: RocketConfig, MegaBoomV3Config, ShuttleConfig, and Saturn Shuttle (FireSimGENV256D128ShuttleConfig). Use automation/chia_firesim_circt/selected_config_build_recipes.yaml, sourced from sims/firesim-staging/sample_config_build_recipes.yaml; plain Shuttle is explicitly derived because the sample lacks it. Never substitute LargeBoom for MegaBoom, Saturn for plain Shuttle, or U250 for F2. Preserve exact recipe/platform semantics. Compare the same pre-MIDAS FIRRTL and annotations against immutable SFC transforms using syntax checks and normalized semantic comparisons, not byte equality or enumeration of every config. Compare interfaces, annotations, bridge constructors, channels, memory behavior, clock/reset/token schedules, MMIO/driver ABI and XDC. A compile-only result is insufficient.
+2. Jasper LEC AND SEC on rocky@32.185.44.117 (ssh alias eda, ~/.ssh/config), installation /tools/Cadence/jasper_2026.06p002. Use /scratch/jfx for remote work. Inspect /scratch/circt_compare or local /scratch/jfx/circt_compare as a starting flow; its SEC and compare-point reports do not establish a separate LEC proof. Both proof modes need actual results and explicit scope/assumptions, with counterexamples, bounded, inconclusive or missing proofs treated as incomplete.
+3. After all four semantic comparisons pass, the harness dispatches a separate FireSim F2 node immediately, in parallel with Jasper. Build bitstreams on THIS manager with an externally provisioned localhost build farm. Use FireSim Manager and F2 run YAML to launch F2 instances and run workloads; ~/firesim.pem is the SSH key if direct investigation is needed. Follow the F2 docs linked in the plan. Never relabel historical U250 artifacts as F2. Require br-base-uniform Linux userspace boot, feature-specific checks where enabled, explicit poweroff and driver/script exit zero. Return exact artifact/runtime evidence; manager completion or the earlier baremetal checksum smoke is insufficient.
+4. Speed: CIRCT must beat SFC FireSim compiler transformation/compile wall time on all four matched inputs. Time from compiler launch on identical pre-MIDAS FIRRTL/annotations until equivalent simulator RTL/collateral is fully emitted, including startup and all required compiler stages. Set timing_scope: firesim_compiler. Simulation/workload runtime, driver execution, Vivado/bitstream builds, deployment, proofs and target elaboration before the compiler handoff are excluded. There is no separate end-to-end workflow speed gate. Use all available cores and MLIR/module parallelism wherever safe; cap simultaneous jobs by affinity, RAM and Jasper licenses. Record cold JVM/startup conditions separately from warmed runs, exact commands, repetitions, thread count, compiler-invoked bridge elaboration costs and peak RSS. No timing claims from cache hits, unlike phases, removed passes or partial outputs.
+5. Full port scope is REQUIRED: FAME5 (grouping, per-thread registers/reset/memories and IO scheduling), enabled AutoCounter/Print integration, generalized multi-model/multi-clock transformation, and NIC support (normal, multiple-widget and loopback coverage). Read automation/chia_firesim_circt/feature_scope.yaml. QSFP/partition transport is deferred. Keep exactly four baseline configurations; add only bounded feature-enabled representatives and focused unit cases, never enumerate all sample configs. Every representative must pass matched SFC/CIRCT semantic/syntax checks, separate Jasper LEC AND SEC, and actual F2 Linux userspace boot, feature-specific exercise, and clean poweroff. Ordinary baseline boot with a feature disabled cannot prove that feature. Implement feature-case execution in the verification nodes and retain hash-bound case receipts under logs/feature-evidence/<candidate-identity>/<feature>/; the features audit is a completion guard, not an implementation checkbox. Baseline-only success cannot end the loop.
 
-NON-NEGOTIABLE IMPLEMENTATION SCOPE: work on the actual Golden Gate compiler in `sims/firesim/sim`. The current Scala FIRRTL compiler under `sims/firesim/sim/midas/src/main/scala/midas/` is the executable semantic oracle; inspect and port its behavior, especially `passes/MidasTransforms.scala` and `passes/fame/FAMETransform.scala`. Implement the CIRCT compiler in the plan's `sims/firesim/sim/goldengate-circt/` tree and make only the necessary FireSim build integration under `sims/firesim/sim/` to invoke it. Every implementation turn must make a concrete, evidence-backed change to those core compiler sources or their direct FireSim compiler build wiring.
+Before FireSim commands on F2, run `source /home/ubuntu/miniforge3/etc/profile.d/conda.sh && cd /scratch/jfx/fsim-circt/sims/firesim && source ./sourceme-manager.sh`. Explicit Conda initialization is required in noninteractive SSH/login shells. Do not use --skip-ssh-setup on F2; SSH setup is required to load the run-host key (~/firesim.pem). CHIA owns separate semantic, Jasper, FireSim, speed and required-feature audit nodes. Do not launch duplicate long verification jobs from this LLM call. Configure real feature execution adapters as prerequisites become available; unset adapters or missing evidence intentionally block completion. Use the latest checkpoints and feature_scope.yaml to choose the next implementation tasks. BaseF2/Linux support and four-target speed have already been demonstrated; preserve them while implementing the mandatory feature streams and diagnosing formal failures.
 
-Strongly prefer core compiler work over `automation/`, FireMarshal, workload JSON, top-level Python tools, runtime YAML, Ray/Chia configuration, logging, provenance guards, and other harness infrastructure. You may make a minimal infrastructure change only when it directly unblocks the current core compiler change or its comparison test. Such a change does not itself count as porting progress: return immediately to the compiler source/build path. Do not substitute a Python checker, log parser, build wrapper, or a claim that SFC was selected for actual CIRCT compiler implementation. If the current FireSim flow invokes SFC, change the compiler source/build integration under `sims/firesim/sim` so it invokes the CIRCT implementation; do not merely detect or report the fallback.
+Use as many subagents as you see fit for independent analysis, implementation and verification support; there is no task-specific limit on delegation. Coordinate shared-worktree edits, but centralize completion here: wait for every subagent, integrate results, finish checks and stop remaining workers before returning. CHIA treats THIS main LLM call returning as implementation completion; background agents cannot finish it later. Likewise the outer loop waits for all verification nodes before allowing the next source mutation.
 
-Follow the milestone order in `FIRESIM_CIRCT_PORT_PLAN.md`: preserve the Scala Golden Gate oracle; establish CIRCT ingestion of the SFC handoff; build annotation, target-identity, hierarchy, clock, model, and channel analyses; then port FAME semantics incrementally. Port semantics through CIRCT/MLIR operations, not Scala syntax. For every core change, select the relevant boundary artifact from the recorded SFC golden directories, compare the CIRCT candidate's corresponding FIRRTL/annotation/RTL/collateral output to it, and use the observed match or mismatch to choose the next change. Prefer semantic and structured comparisons (annotation classes, targets, channels, modules, ports, clocks, and emitted collateral) over brittle byte-for-byte RTL equality. State the exact golden artifact compared and the result in the final report. Do not claim completion of the overall port.
+Prefer concurrent owners for FAME5, AutoCounter/Print, multi-clock/generalized models and NIC when dependencies permit. Assign shared-file ownership and integrate common model/clock/state APIs centrally. Begin useful independent feature implementation while formal diagnosis continues across turns; these requirements are not deferred until the original four-target milestone ends. Reuse FPGA build/runtime evidence only with verified matching artifact/build/driver/workload/policy identities; unrelated source or documentation changes should not force duplicate Vivado work.
 
-For debugging, read the recorded SFC golden-reference section in that steps document. Its immutable fixtures are `/scratch/jfx/fsim-circt/sims/firesim-staging/generated-src/firechip.chip.FireSim.FireSimRocketConfig.sfc-golden-2026-10-01` (the compiler oracle) and `/scratch/jfx/fsim-circt/sims/firesim/deploy/results-build/2026-10-01--04-55-23-circt_u250_firesim_rocket_singlecore/cl_xilinx_alveo_u250-firesim-FireSim-FireSimRocketConfig-BaseXilinxAlveoU250Config.sfc-golden-2026-10-01` (the U250 build-tree reference). Never overwrite or edit either fixture; use them to diagnose a candidate/output mismatch.
+Report changed files, exact golden comparisons and tests, remaining gaps and next action. End with LOOP_COMPLETE: yes only if baseline correctness, faster transformation, and all four full-port feature requirements are achieved, otherwise LOOP_COMPLETE: no. CHIA accepts yes only when every current verification node, including features, passes for this candidate.
 
-Before Chipyard or FireSim commands, run `cd /scratch/jfx/fsim-circt/sims/firesim && source ./sourceme-manager.sh --skip-ssh-setup`; it includes the project environment and the FireSim CLI. The harness owns verification and enforces this mandatory order: (1) FireSim `replacertl` compile, which must select and exercise the CIRCT FireSim compiler path rather than silently falling back to SFC; (2) FireSim **Verilator** metasimulation of that transformed RTL (`metasimulation_host_simulator: verilator`); and only if that Verilator simulation passes, (3) the FireSim U250 `buildbitstream` manager step. Never SSH directly to a build or FPGA machine. Do not start any of those verification steps yourself. When a gate fails, read the supplied complete stdout/stderr and FireSim-manager log paths before making the smallest fix. Preserve user changes outside files you intentionally touch.
-
-At the end, report: changed files, tests/artifacts inspected, remaining risk, and the next smallest porting step. End with exactly one of these lines: `LOOP_COMPLETE: yes` only if you judge that the CIRCT port's stated goal is fully achieved, or `LOOP_COMPLETE: no` otherwise. A passing validation gate alone is not sufficient to declare completion.
-
-Iteration {iteration} of {total}. Verification feedback from the prior iteration:
-{previous_verification or '(No prior verification feedback.)'}
-
-Codex model selected for this iteration: {model or 'Codex CLI default'}
-
-Live worktree snapshot at the start of this iteration:
-{_workspace_snapshot()}
+Iteration {iteration} of {total}. Previous verification:
+{_bounded_text(previous_verification, FEEDBACK_MAX_CHARS) if previous_verification else '(No prior verification feedback.)'}
+Model: {model or 'Codex CLI default'}
+Live worktree snapshot:
+{_bounded_text(_workspace_snapshot(), 24_000)}
 """
+
+
+
+def _nic_repair_prompt(previous: str, iteration: int, total: int, model: str | None) -> str:
+    return f"""You are the main NIC runtime repair agent for the FireSim CIRCT port.
+ACTIVE PHASE: NIC REPAIR. Work inside {REPO}. Read FIRESIM_CIRCT_PORT_PLAN.md,
+CHIA_OPERATOR_VERIFICATION_20261103.md when present, and retained failure evidence.
+Preserve unrelated edits, immutable SFC goldens and all failed FPGA/proof results.
+Diagnose and fix the actual production compiler/platform/host driver/NIC path.
+
+The harness checks exactly Rocket, MegaBoomV3, plain Shuttle and Saturn Shuttle
+baseline syntax/static semantics. After they pass, a separate CHIA node runs
+exactly four NIC Linux representatives: single normal NIC, two independent NICs,
+compile-time loopback, and mixed normal/per-widget runtime loopback. It joins all
+workers and checks owned farm cleanup before another implementation call. Runtime
+failures feed the next implementation turn automatically. Source readiness text
+and LOOP_COMPLETE declarations cannot complete this repair. Completion requires
+all four current-source NIC Linux/packet/poweroff/cleanup results. Full feature,
+formal and compiler-speed acceptance remain separate and incomplete.
+
+Do not launch Jasper, baseline FPGA builds, compiler benchmarks or duplicate long
+FPGA jobs from this implementation call. Do not wait for formal verification.
+Retain defined-state/token/MMIO/packet checks; do not waive zero-byte writes or
+stalls as success. A nonblocking stream push may return zero: any pending reply
+must remain byte-identical and owned until an exactly-once complete transfer.
+Trace actual FIFO occupancy, address/count wiring, host ordering and token
+conservation rather than concealing drift with blind retries. Keep nonzero short
+transfers fatal and DRAM zero_out_dram false. Written workload memory is strict;
+unwritten memory is unspecified. Real Linux userspace, packet checks, poweroff,
+driver zero exit and run-farm cleanup are mandatory.
+
+Use as many subagents as useful with explicit file ownership; integrate and join
+all implementation subagents before returning. Use available cores within RAM and
+shared Vivado locks. FPGA inputs stay frozen while verification runs. Reuse a
+bitstream only when hardware identity matches; changed host drivers require new
+source-bound runtime receipts. Before manager commands source the Conda profile,
+then source ./sourceme-manager.sh in sims/firesim with SSH setup enabled.
+
+If native compiler sources change, rebuild with available cores, copy the binary
+to a new immutable hash-named path, and atomically update the active verification
+YAML compiler references and candidate output root before returning. Never
+overwrite pinned compilers or archived candidates. Host-only changes still need
+current-source production compile/link and fresh runtime verification. The harness
+reads the active YAML each iteration. Report changed files, regressions, evidence
+and remaining issues. Keep LOOP_COMPLETE: no; no full-port completion is awarded.
+
+Iteration {iteration} of {total}. Model: {model or 'Codex CLI default'}
+Previous verification diagnostics:
+{_bounded_text(previous, FEEDBACK_MAX_CHARS) if previous else '(No prior feedback.)'}
+Live worktree snapshot:
+{_bounded_text(_workspace_snapshot(), 24_000)}
+"""
+
+
+def _feature_linux_repair_prompt(previous: str, iteration: int, total: int,
+                                  model: str | None) -> str:
+    return f"""You are the main integrated-feature Linux verification repair agent.
+ACTIVE PHASE: ALL-SEVEN FEATURE LINUX REPAIR. Work inside {REPO}. Read
+FIRESIM_CIRCT_PORT_PLAN.md and the retained current verification evidence. Preserve
+unrelated edits, immutable SFC goldens, historical failures and verified candidates.
+
+The harness checks exactly Rocket, MegaBoomV3, plain Shuttle and Saturn Shuttle
+baseline syntax/static semantics, then a separate node executes exactly seven
+bounded enabled-feature Linux representatives on the same current candidate:
+FAME5 with all four logical threads, combined AutoCounter/Print, multiclock models,
+normal single NIC, two independent NICs, compile-time loopback and mixed
+normal/per-widget runtime loopback. Every case needs real F2 Linux userspace,
+its feature-specific checks, explicit poweroff, driver zero exit and owned farm
+cleanup. The harness joins all workers before another implementation call; failed
+joined verification feeds the next repair turn automatically. All seven current
+passing results with matching identities are required. Source-readiness or
+LOOP_COMPLETE declarations cannot end this phase. This verifies integrated
+runtime coverage; full feature semantic/formal and compiler-speed acceptance
+remain separate and incomplete.
+
+Repair production compiler/platform/host/guest/checker failures without weakening
+observations, accepting stale receipts or replacing feature-enabled cases with
+baseline boots. Keep DRAM zero_out_dram false, defined memory and token/packet
+checks strict, and unwritten memory unspecified. Preserve exactly-once pending
+reply ownership and reject short/malformed transfers. Do not launch Jasper,
+baseline FPGA builds, compiler benchmarks or duplicate long FPGA jobs from this
+implementation call. Do not wait for formal verification.
+
+Use as many subagents as useful with explicit file ownership; integrate centrally
+and join every implementation subagent before returning. Use available cores
+within RAM and shared Vivado locks. The verification node freezes each build/run
+snapshot. Reuse hardware only when its exact hardware identity matches; rebuild
+changed host/guest artifacts and bind fresh runtime receipts. Before manager
+commands source the Conda profile, then source ./sourceme-manager.sh in
+sims/firesim with SSH setup enabled; never use --skip-ssh-setup on F2.
+
+If native compiler sources change, rebuild using available cores, pin the binary
+to a new immutable hash-named path, and atomically update the active verification
+YAML compiler references and candidate output root before returning. Never
+overwrite pinned compilers or archived candidates. Keep the main default
+automation/chia_firesim_circt/verification.yaml compiler pin aligned with the
+active YAML so the integrated workspace remains runnable. The harness rereads
+the active YAML on each iteration. Report changes, tests, evidence and remaining issues.
+Keep LOOP_COMPLETE: no; this phase cannot award full-port completion.
+
+Iteration {iteration} of {total}. Model: {model or 'Codex CLI default'}
+Previous verification diagnostics:
+{_bounded_text(previous, FEEDBACK_MAX_CHARS) if previous else '(No prior feedback.)'}
+Live worktree snapshot:
+{_bounded_text(_workspace_snapshot(), 24_000)}
+"""
+
+
+def _feature_implementation_prompt(previous: str, iteration: int, total: int,
+                                   model: str | None, readiness_path: Path | None) -> str:
+    return f"""You are the main FireSim SFC-to-CIRCT implementation agent.
+ACTIVE PHASE: FEATURE IMPLEMENTATION. The user explicitly stopped formal verification
+and requested finishing all remaining implementation first. Do not launch Jasper
+LEC/SEC in this phase. After each implementation turn, the harness checks exactly four
+baseline semantics, freezes a passing candidate and launches its FPGA verification in
+an independent background job. Implementation resumes as soon as semantic checks and
+the immutable snapshot finish; it does not wait for FPGA execution, formal proofs or
+compiler benchmarks. Do not edit frozen background snapshots. Do not wait for formal
+signoff before implementing independent features. Final port acceptance still requires
+the normal full CHIA graph; this phase cannot satisfy LOOP_COMPLETE.
+
+Read FIRESIM_CIRCT_PORT_PLAN.md and CHIA_OPERATOR_FEATURE_FIRST_20261102.md first,
+then CHIA_OPERATOR_FEATURE_COMPLETENESS_20261102.md subject to that newer instruction,
+automation/chia_firesim_circt/feature_scope.yaml, current sources and git status.
+Work in {REPO}; preserve unrelated edits, immutable SFC goldens and justified
+CIRCT correctness fixes. Complete actual production paths, not additional isolated
+helpers: FAME5 grouping/scheduling and external sharing; enabled AutoCounter/Print
+with shared MMIO/streams/driver headers; generalized model/domain platform transport;
+and normal/multiple-widget/compile-time/runtime-loopback NIC integration. Finish
+bounded Linux-capable configurations, feature workloads/checkers and real execution
+adapters for every representative in feature_scope.yaml. Exactly four baseline
+targets remain Rocket, MegaBoomV3, plain Shuttle and Saturn Shuttle. QSFP is deferred.
+
+Use as many concurrent subagents as useful with explicit shared-file ownership.
+Integrate centrally and join every implementation-owned worker/process before returning.
+CHIA-owned FPGA jobs run on frozen snapshots and may continue between turns. Use available
+cores safely within RAM and shared build limits. Run meaningful focused unchanged-SFC
+semantic/RTL/ABI comparisons, driver builds and workload/checker validation as needed.
+Feature-specific FPGA builds/runs must also use isolated background execution
+adapters with the real FireSim manager, controlled resources and cleanup; do not
+wait for FPGA jobs inside an implementation call. Consume their retained results
+in subsequent turns and do not repeatedly rebuild the four baseline designs.
+Join implementation subagents and their short checks, not independent FPGA jobs.
+Before FireSim commands:
+source /home/ubuntu/miniforge3/etc/profile.d/conda.sh, then cd sims/firesim and
+source ./sourceme-manager.sh with SSH setup enabled. Leave zero_out_dram false.
+Unwritten memory is unspecified; defined controls, initialized/written state and
+observable transactions remain strict. Preserve retained formal diagnostics for later.
+
+Continue implementing until all four required streams and all seven bounded cases
+are runnable through production compiler/platform/driver/workload paths. Report exact
+changed files, successful commands, evidence hashes and remaining implementation gaps.
+When actually implemented, write {readiness_path} using the schema in
+automation/chia_firesim_circt/feature_implementation_readiness.py and README.md.
+The report must be fresh this turn, bind current source_identity (call that module's
+source_identity(REPO)), compiler hash, all four features with no remaining gaps, and
+every declared representative with config/rtl/driver/workload/checker/execution_adapter
+hashes plus production_compile, driver_build and workload_checker successful command
+receipts. This is implementation readiness only; do not fabricate formal or FPGA
+acceptance. End with FEATURE_IMPLEMENTATION_COMPLETE: yes only with that evidence,
+otherwise no. Always keep LOOP_COMPLETE: no in this phase. Text declarations alone
+cannot finish this milestone. The loop continues implementation if evidence is absent.
+
+Iteration {iteration} of {total}. Model: {model or 'Codex CLI default'}
+Previous implementation/verification diagnostics:
+{_bounded_text(previous, FEEDBACK_MAX_CHARS) if previous else '(No prior feedback.)'}
+Live worktree snapshot:
+{_bounded_text(_workspace_snapshot(), 24_000)}
+"""
+
+
+def _feature_implementation_result(response: str, readiness_path: Path, started_ns: int) -> dict:
+    result = {"phase": "feature-implementation", "implementation_ready": False,
+              "verified_complete": False, "report": str(readiness_path),
+              "verification_dispatched": False}
+    if not FEATURE_READY_RE.search(response):
+        result["reason"] = "Implementation continues; no evidence-backed feature readiness declaration."
+        return result
+    try:
+        validator = runpy.run_path(str(AUTOMATION / "feature_implementation_readiness.py"))
+        result.update(validator["validate_readiness"](readiness_path, REPO, started_ns))
+    except Exception as error:
+        result["reason"] = f"Feature readiness rejected: {type(error).__name__}: {error}"
+    return result
+
+
+def _feature_implementation_iteration(config: dict, run_id: str, response: str,
+                                      readiness_path: Path, started_ns: int) -> tuple[dict, list[dict]]:
+    """Semantic join, immutable FPGA dispatch, then resume implementation."""
+    semantic = get(verify_semantic.chia_remote(config, run_id, _chia_tag="feature-semantic"))
+    result = {"phase": "feature-implementation", "implementation_ready": False,
+              "verified_complete": False, "report": str(readiness_path),
+              "formal_dispatched": False, "semantic_status": semantic.get("status"),
+              "semantic_evidence": semantic.get("evidence")}
+    if not semantic.get("ok"):
+        result["reason"] = "Repair the four-target semantic failure before progressing to another feature."
+        return result, [semantic]
+    result.update(_feature_implementation_result(response, readiness_path, started_ns))
+    result.pop("verification_dispatched", None)
+    try:
+        background = runpy.run_path(str(AUTOMATION / "background_f2.py"))
+        result["background_f2"] = background["launch"](config, run_id, semantic, REPO)
+    except Exception as error:
+        result["background_f2"] = {"status": "dispatch_failed",
+                                   "reason": f"{type(error).__name__}: {error}"}
+        result["implementation_ready"] = False
+    return result, [semantic]
+
+
+def _feature_background_status() -> dict:
+    """Read frozen FPGA job outcomes without joining their execution."""
+    try:
+        background = runpy.run_path(str(AUTOMATION / "background_f2.py"))
+        return background["status"](REPO)
+    except Exception as error:
+        return {"status": "unavailable", "reason": f"{type(error).__name__}: {error}"}
 
 
 def _format_verification(raw: list[dict[str, object]]) -> str:
@@ -687,137 +1031,507 @@ def _format_verification(raw: list[dict[str, object]]) -> str:
     return "\n\n".join(reports)
 
 
+def _run_verification_node(node: str, config: dict, run_id: str,
+                           semantic: dict | None = None) -> dict:
+    """Load current node implementations on workers; retain setup errors as evidence."""
+    evidence_dir = AUTOMATION / "logs" / "verification" / _safe_filename(run_id)
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        module = ("feature_acceptance.py" if node == "features" else
+                  "feature_linux.py" if node == "feature_linux" else "verification_nodes.py")
+        implementation = runpy.run_path(str(AUTOMATION / module))
+        function = implementation[f"run_{node}"]
+        if node == "semantic":
+            return function(config, evidence_dir, REPO)
+        return function(config, evidence_dir, REPO, semantic)
+    except Exception as error:
+        report = {"node": node, "status": "failed", "ok": False,
+                  "reason": f"{type(error).__name__}: {error}", "details": [],
+                  "evidence": str(evidence_dir / f"{node}-dispatch-error.json")}
+        Path(report["evidence"]).write_text(json.dumps(report, indent=2) + "\n")
+        return report
+
+
+@ChiaFunction(resources={"golden_compare": 0.01})
+def verify_semantic(config: dict, run_id: str) -> dict:
+    return _run_verification_node("semantic", config, run_id)
+
+
+@ChiaFunction(resources={"jasper": 0.01})
+def verify_jasper(config: dict, run_id: str, semantic: dict) -> dict:
+    return _run_verification_node("jasper", config, run_id, semantic)
+
+
+@ChiaFunction(resources={"firesim_manager": 0.01})
+def verify_f2(config: dict, run_id: str, semantic: dict) -> dict:
+    return _run_verification_node("firesim", config, run_id, semantic)
+
+
+@ChiaFunction(resources={"firesim_manager": 0.01})
+def verify_feature_linux(config: dict, run_id: str, semantic: dict) -> dict:
+    return _run_verification_node("feature_linux", config, run_id, semantic)
+
+
+@ChiaFunction(resources={"compile_benchmark": 0.01})
+def verify_speed(config: dict, run_id: str, semantic: dict) -> dict:
+    return _run_verification_node("speed", config, run_id, semantic)
+
+
+@ChiaFunction(resources={"golden_compare": 0.01})
+def verify_features(config: dict, run_id: str, semantic: dict) -> dict:
+    return _run_verification_node("features", config, run_id, semantic)
+
+
+def _verification_graph(config: dict, run_id: str) -> list[dict]:
+    """Baseline verification followed by a mandatory full-port evidence audit."""
+    semantic = get(verify_semantic.chia_remote(config, run_id, _chia_tag="semantic"))
+    if not semantic.get("ok"):
+        return [semantic]
+    reports = [semantic]
+    # Dispatch both branches before waiting. A dispatch failure must still
+    # drain any task that already started before source mutations resume.
+    pending = []
+    for name, function, tag in (("firesim", verify_f2, "firesim-f2"),
+                                ("jasper", verify_jasper, "jasper-lec-sec"),
+                                ("feature_linux", verify_feature_linux, "feature-linux")):
+        try:
+            pending.append((name, function.chia_remote(
+                config, run_id, semantic, _chia_tag=tag)))
+        except Exception as error:
+            reports.append({"node": name, "status": "failed", "ok": False,
+                            "reason": f"CHIA dispatch error: {error}"})
+    # Drain all tasks even if one raises, before the next agent can edit inputs.
+    for name, task in pending:
+        try:
+            reports.append(get(task))
+        except Exception as error:
+            reports.append({"node": name, "status": "failed", "ok": False,
+                            "reason": f"CHIA worker error: {error}"})
+    if any(report.get("workers_joined") is False for report in reports):
+        for name in ("speed", "features"):
+            reports.append({"node": name, "status": "blocked", "ok": False,
+                            "reason": "Enabled FPGA workers are not confirmed stopped; retain inputs and resolve cleanup."})
+        return reports
+    # Measure with the local bitstream build finished, so Vivado cannot skew
+    # compiler wall time or compete for the compiler's available core budget.
+    try:
+        reports.append(get(verify_speed.chia_remote(
+            config, run_id, semantic, _chia_tag="compile-speed")))
+    except Exception as error:
+        reports.append({"node": "speed", "status": "failed", "ok": False,
+                        "reason": f"CHIA worker error: {error}"})
+    try:
+        reports.append(get(verify_features.chia_remote(
+            config, run_id, semantic, _chia_tag="required-features")))
+    except Exception as error:
+        reports.append({"node": "features", "status": "failed", "ok": False,
+                        "reason": f"CHIA worker error: {error}"})
+    return reports
+
+
+
+NIC_REPAIR_CASES = frozenset({
+    "normal_single_nic_linux_bidirectional_packet_checks",
+    "two_nic_linux_independent_concurrent_traffic",
+    "compile_time_loopback_nic_linux_packet_checks",
+    "runtime_per_widget_nic_loopback_linux_packet_checks",
+})
+NIC_BASELINE_TARGETS = frozenset({"rocket", "megaboomv3", "shuttle", "saturn_shuttle"})
+
+
+def _nic_repair_graph(config: dict, run_id: str) -> list[dict]:
+    """Join four baseline comparisons then four NIC Linux cases; no formal jobs."""
+    options = config.get("feature_linux", {})
+    cases = options.get("cases", []) if isinstance(options, dict) else []
+    if (not isinstance(cases, list) or len(cases) != len(NIC_REPAIR_CASES)
+            or any(not isinstance(case, str) for case in cases)
+            or set(cases) != NIC_REPAIR_CASES):
+        return [{"node": "configuration", "status": "failed", "ok": False,
+                 "workers_joined": True,
+                 "reason": "nic-repair requires exactly the four declared NIC Linux representatives"}]
+    semantic = get(verify_semantic.chia_remote(config, run_id, _chia_tag="nic-baseline-semantic"))
+    reports = [semantic]
+    if semantic.get("ok") is not True:
+        return reports
+    # The node owns cancellation, terminal joins and farm cleanup. A lost task
+    # cannot establish those joins; stop source mutation on uncertainty.
+    try:
+        task = verify_feature_linux.chia_remote(config, run_id, semantic,
+                                                _chia_tag="nic-feature-linux")
+        report = get(task)
+        if report.get("workers_joined") is not True:
+            report["workers_joined"] = False
+        reports.append(report)
+    except Exception as error:
+        reports.append({"node": "feature_linux", "status": "failed", "ok": False,
+                        "workers_joined": False,
+                        "reason": f"NIC verification task failed; cleanup must be confirmed before editing: {error}"})
+    return reports
+
+
+
+def _nic_repair_progress(run_id: str, iteration: int, phase: str,
+                         reports: list[dict] | None = None) -> None:
+    """Publish small operator progress outside the candidate source identity."""
+    path = AUTOMATION / "logs/nic-repair-active.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {"run_id": run_id, "iteration": iteration, "phase": phase,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "evidence": str(AUTOMATION / "logs/verification" / run_id),
+            "formal_enabled": False, "full_acceptance": False}
+    if reports is not None:
+        data["nodes"] = [{key: row[key] for key in
+                          ("node", "status", "ok", "workers_joined", "identity", "evidence")
+                          if key in row} for row in reports]
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(data, indent=2) + "\n")
+    temporary.replace(path)
+
+
+def _nic_repair_complete(reports: list[dict]) -> bool:
+    """Only current four-case runtime evidence ends this scoped repair."""
+    if (not isinstance(reports, list) or len(reports) != 2
+            or any(not isinstance(row, dict) for row in reports)):
+        return False
+    semantic, linux = reports
+    if (semantic.get("node") != "semantic" or linux.get("node") != "feature_linux"
+            or not semantic.get("identity")
+            or semantic.get("identity") != linux.get("identity")
+            or any(row.get("ok") is not True or row.get("status") != "passed" for row in reports)
+            or linux.get("workers_joined") is not True
+            or linux.get("full_acceptance") is not False
+            or linux.get("formal_claim") is not False):
+        return False
+    baseline = semantic.get("details", [])
+    selected = linux.get("selected_cases", [])
+    details = linux.get("details", [])
+    if (not isinstance(baseline, list) or not isinstance(selected, list)
+            or not isinstance(details, list)
+            or any(not isinstance(row, dict) or not isinstance(row.get("target"), str) for row in baseline)
+            or any(not isinstance(case, str) for case in selected)
+            or any(not isinstance(row, dict) or not isinstance(row.get("case_id"), str) for row in details)):
+        return False
+    return (len(baseline) == 4
+            and {row.get("target") for row in baseline} == NIC_BASELINE_TARGETS
+            and all(row.get("ok") is True and row.get("status") == "passed" for row in baseline)
+            and len(selected) == 4 and set(selected) == NIC_REPAIR_CASES
+            and len(details) == 4
+            and {row.get("case_id") for row in details} == NIC_REPAIR_CASES
+            and all(row.get("ok") is True and row.get("status") == "passed"
+                    and row.get("result") and row.get("feature_checks") for row in details))
+
+
+
+FEATURE_LINUX_REPAIR_CASES = NIC_REPAIR_CASES | frozenset({
+    "threaded_repeated_model_linux_all_threads_exercised",
+    "enabled_autocounter_and_print_linux_checked_csv_and_prints",
+    "multiclock_multimodel_linux_checked_domain_activity",
+})
+
+
+def _feature_linux_repair_graph(config: dict, run_id: str) -> list[dict]:
+    """Join four baseline comparisons then all seven feature Linux cases; no formal jobs."""
+    options = config.get("feature_linux", {})
+    cases = options.get("cases", []) if isinstance(options, dict) else []
+    if (not isinstance(cases, list) or len(cases) != len(FEATURE_LINUX_REPAIR_CASES)
+            or any(not isinstance(case, str) for case in cases)
+            or set(cases) != FEATURE_LINUX_REPAIR_CASES):
+        return [{"node": "configuration", "status": "failed", "ok": False,
+                 "workers_joined": True,
+                 "reason": "feature-linux-repair requires exactly the seven declared enabled-feature Linux representatives"}]
+    semantic = get(verify_semantic.chia_remote(config, run_id, _chia_tag="feature-linux-baseline-semantic"))
+    reports = [semantic]
+    if semantic.get("ok") is not True:
+        return reports
+    # The node owns cancellation, terminal joins and farm cleanup. A lost task
+    # cannot establish those joins; stop source mutation on uncertainty.
+    try:
+        task = verify_feature_linux.chia_remote(config, run_id, semantic,
+                                                _chia_tag="all-feature-linux")
+        report = get(task)
+        if report.get("workers_joined") is not True:
+            report["workers_joined"] = False
+        reports.append(report)
+    except Exception as error:
+        reports.append({"node": "feature_linux", "status": "failed", "ok": False,
+                        "workers_joined": False,
+                        "reason": f"Feature Linux verification task failed; cleanup must be confirmed before editing: {error}"})
+    return reports
+
+
+
+def _feature_linux_repair_progress(run_id: str, iteration: int, phase: str,
+                         reports: list[dict] | None = None) -> None:
+    """Publish small operator progress outside the candidate source identity."""
+    path = AUTOMATION / "logs/feature-linux-repair-active.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {"run_id": run_id, "iteration": iteration, "phase": phase,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "evidence": str(AUTOMATION / "logs/verification" / run_id),
+            "formal_enabled": False, "full_acceptance": False}
+    if reports is not None:
+        data["nodes"] = [{key: row[key] for key in
+                          ("node", "status", "ok", "workers_joined", "identity", "evidence")
+                          if key in row} for row in reports]
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(data, indent=2) + "\n")
+    temporary.replace(path)
+
+
+def _feature_linux_repair_complete(reports: list[dict]) -> bool:
+    """Only current seven-case runtime evidence ends this scoped repair."""
+    if (not isinstance(reports, list) or len(reports) != 2
+            or any(not isinstance(row, dict) for row in reports)):
+        return False
+    semantic, linux = reports
+    if (semantic.get("node") != "semantic" or linux.get("node") != "feature_linux"
+            or not semantic.get("identity")
+            or semantic.get("identity") != linux.get("identity")
+            or any(row.get("ok") is not True or row.get("status") != "passed" for row in reports)
+            or linux.get("workers_joined") is not True
+            or linux.get("full_acceptance") is not False
+            or linux.get("formal_claim") is not False
+            or linux.get("passed") is not True
+            or linux.get("full_matrix") is not True
+            or linux.get("remaining_cases") != []
+            or not isinstance(linux.get("required_cases"), list)
+            or any(not isinstance(case, str) for case in linux["required_cases"])
+            or len(linux["required_cases"]) != 7
+            or set(linux["required_cases"]) != FEATURE_LINUX_REPAIR_CASES):
+        return False
+    baseline = semantic.get("details", [])
+    selected = linux.get("selected_cases", [])
+    details = linux.get("details", [])
+    if (not isinstance(baseline, list) or not isinstance(selected, list)
+            or not isinstance(details, list)
+            or any(not isinstance(row, dict) or not isinstance(row.get("target"), str) for row in baseline)
+            or any(not isinstance(case, str) for case in selected)
+            or any(not isinstance(row, dict) or not isinstance(row.get("case_id"), str) for row in details)):
+        return False
+    return (len(baseline) == 4
+            and {row.get("target") for row in baseline} == NIC_BASELINE_TARGETS
+            and all(row.get("ok") is True and row.get("status") == "passed" for row in baseline)
+            and len(selected) == 7 and set(selected) == FEATURE_LINUX_REPAIR_CASES
+            and len(details) == 7
+            and {row.get("case_id") for row in details} == FEATURE_LINUX_REPAIR_CASES
+            and all(row.get("ok") is True and row.get("status") == "passed"
+                    and row.get("result") and row.get("feature_checks") for row in details))
+
+
+def _graph_complete(reports: list[dict]) -> bool:
+    return (len(reports) == 6
+            and {report.get("node") for report in reports}
+            == {"semantic", "jasper", "firesim", "feature_linux", "speed", "features"}
+            and bool(reports[0].get("identity"))
+            and all(report.get("identity") == reports[0]["identity"] for report in reports)
+            and all(report.get("full_matrix") is True for report in reports
+                    if report.get("node") == "feature_linux")
+            and all(report.get("ok") is True for report in reports))
+
+
+def _require_codex_success(response: CodexQueryResult) -> None:
+    if response.returncode != 0 or not response.success:
+        raise RuntimeError(
+            "Codex implementation call failed; verification and further implementation "
+            "iterations were not started. Inspect the Codex transcript before restarting.\n"
+            + response.stderr[-4000:]
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--iterations", type=int, default=3)
-    parser.add_argument(
-        "--verify",
-        choices=("none", "preflight", "compile", "metasim", "full", "boot"),
-        default="preflight",
-        help="Verification profile; full runs compile and bare-metal Verilator metasim every iteration, with periodic U250 Linux boot (boot is a compatibility alias).",
-    )
+    parser.add_argument("--verify", choices=("none", "preflight", "compile", "metasim", "full", "boot", "feature-implementation", "nic-repair", "feature-linux-repair"),
+                        default="full", help="full/boot: semantic -> F2/Jasper -> speed -> features; feature-implementation: semantic -> frozen background F2 -> next implementation; nic-repair: semantic -> four NIC Linux cases -> repair; feature-linux-repair: semantic -> seven feature Linux cases -> repair, no formal dispatch")
+    parser.add_argument("--verification-config", type=Path,
+                        default=AUTOMATION / "verification.yaml")
     parser.add_argument("--model", default=None, help="Optional Codex CLI model override")
-    parser.add_argument(
-        "--linux-boot-after-bare-successes",
-        type=int,
-        default=15,
-        help="For full/boot verification, run the U250 Linux gate after this many consecutive bare-metal metasim passes (default: 15).",
-    )
+    parser.add_argument("--implementation-timeout-seconds", type=int, default=14400,
+                        help="Wall limit for each implementation call (default: four hours)")
+    parser.add_argument("--verification-first", action="store_true",
+                        help="Verify the saved candidate before the first implementation call (full/boot/nic-repair/feature-linux-repair only)")
+    parser.add_argument("--feedback-from", type=Path,
+                        help="Prior graph.json to summarize for the first implementation turn; never reuses acceptance")
     parser.add_argument("--ray-address", default=os.environ.get("RAY_ADDRESS", "auto"))
     args = parser.parse_args()
     if args.iterations < 1:
         parser.error("--iterations must be positive")
-    if args.linux_boot_after_bare_successes < 1:
-        parser.error("--linux-boot-after-bare-successes must be positive")
+    if args.implementation_timeout_seconds < 1:
+        parser.error("--implementation-timeout-seconds must be positive")
+    if args.verification_first and args.verify not in {"full", "boot", "nic-repair", "feature-linux-repair"}:
+        parser.error("--verification-first requires --verify full, boot, nic-repair or feature-linux-repair")
 
-    ray.init(address=args.ray_address)
-    start_collector(log_dir=str(AUTOMATION / "profiles"))
-    agent = StreamingCodexLLM(
-        model=args.model,
-        reasoning_effort="high",
-        work_dir=str(REPO),
-        # The user explicitly authorizes autonomous repository edits and git
-        # checkpoints.  Chia's Codex wrapper implements that via this CLI flag.
-        dangerously_bypass_approvals_and_sandbox=True,
-        resume_session=True,
-        timeout_seconds=3600,
-        retries=1,
-        log_dir=str(AUTOMATION / "logs"),
-    )
-    feedback = ""
-    loop_run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + f"-pid{os.getpid()}"
-    goal_complete = False
-    baremetal_success_streak = 0
-    try:
-        for iteration in range(1, args.iterations + 1):
-            model = _live_model(args.model)
-            if model != agent.model:
-                print(f"Switching Codex model for iteration {iteration}: {agent.model or 'Codex CLI default'} -> {model or 'Codex CLI default'}")
-                agent.model = model
-            prompt = _agent_prompt(feedback, iteration, args.iterations, agent.model)
-            transcript_path = f"{agent._log_prefix}.log" if agent._log_prefix else "(Codex transcript logging disabled)"
-            print(f"\n=== Codex iteration {iteration}: PROMPT ===\n{prompt}\n=== Codex iteration {iteration}: DISPATCHED ===", flush=True)
-            print(f"[codex:{iteration}] transcript: {transcript_path}", flush=True)
-            # ChiaFunction remote methods are not Python-bound at dispatch
-            # time: pass the CodexLLM instance explicitly as ``self``.
-            response = get(agent.prompt.chia_remote(
-                agent,
-                prompt,
-            ))
-            print(f"\n=== Codex iteration {iteration}: RESPONSE ===\n{response.result}\n", flush=True)
-            if response.stream_result:
-                print(f"=== Codex iteration {iteration}: EVENT STREAM ===\n{response.stream_result}", flush=True)
-            if response.stderr:
-                print(f"=== Codex iteration {iteration}: STDERR ===\n{response.stderr}", flush=True)
-            hardware_gate_attempted = (
-                args.verify in {"full", "boot"}
-                and baremetal_success_streak + 1 >= args.linux_boot_after_bare_successes
-            )
-            if args.verify in {"full", "boot"}:
-                if hardware_gate_attempted:
-                    print(
-                        f"=== FireSim verification {iteration}: DISPATCHED ({args.verify}; "
-                        f"bare-metal streak will reach {args.linux_boot_after_bare_successes}, U250 Linux gate enabled) ===",
-                        flush=True,
-                    )
-                else:
-                    print(
-                        f"=== FireSim verification {iteration}: DISPATCHED ({args.verify}; "
-                        f"bare-metal streak {baremetal_success_streak}/{args.linux_boot_after_bare_successes}, U250 Linux gate deferred) ===",
-                        flush=True,
-                    )
-            else:
-                print(f"=== FireSim verification {iteration}: DISPATCHED ({args.verify}) ===", flush=True)
-            verification = get(verify_with_firesim.chia_remote(
-                args.verify,
-                f"{loop_run_id}-iter{iteration}-{args.verify}",
-                hardware_gate_attempted,
-                _chia_tag=f"verify-{iteration}-{args.verify}",
-            ))
-            feedback = _format_verification(verification)
-            print(f"\n=== FireSim verification {iteration}: SUMMARY ===\n{feedback}\n", flush=True)
-            verification_passed = all(item["returncode"] == 0 for item in verification)
-            baremetal_passed = verification_passed and any(
-                item["name"] == "required_rocket_regressions" for item in verification
-            )
-            if args.verify in {"full", "boot"}:
-                if baremetal_passed:
-                    baremetal_success_streak += 1
-                else:
-                    baremetal_success_streak = 0
-                if hardware_gate_attempted:
-                    # A scheduled hardware gate consumes the streak whether it
-                    # passes or fails: after a source change, earn fresh cheap
-                    # functional evidence before spending another U250 boot.
-                    baremetal_success_streak = 0
-                    print(
-                        "U250 Linux gate completed; bare-metal success streak reset to 0.",
-                        flush=True,
-                    )
-                elif baremetal_passed:
-                    print(
-                        f"Bare-metal metasim pass {baremetal_success_streak}/"
-                        f"{args.linux_boot_after_bare_successes}; U250 Linux gate deferred.",
-                        flush=True,
-                    )
-            if not verification_passed:
-                print("Verification failed; its compiler/error tail and full log paths will be supplied to Codex in the next iteration.")
-            elif (
-                args.verify in {"full", "boot"}
-                and hardware_gate_attempted
-                and GOAL_COMPLETE_RE.search(response.result)
-            ):
-                goal_complete = True
-                print("The complete FireSim gate passed and Codex declared the port goal achieved; ending the loop.")
-                break
-            else:
-                print("Verification passed, but Codex has not declared the port goal complete; continuing the engineering loop.")
-    finally:
-        ray.shutdown()
-    if not goal_complete:
-        raise RuntimeError(
-            "Iteration limit reached without a validated `LOOP_COMPLETE: yes` declaration; job is not complete."
+    # One shared candidate must not be mutated by overlapping implementation loops.
+    with (AUTOMATION / ".loop.lock").open("a") as loop_lock:
+        try:
+            fcntl.flock(loop_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            parser.error("Another implementation loop owns this shared checkout")
+        ray.init(address=args.ray_address)
+        start_collector(log_dir=str(AUTOMATION / "profiles"))
+        agent = StreamingCodexLLM(
+            model=args.model, reasoning_effort="high", work_dir=str(REPO),
+            dangerously_bypass_approvals_and_sandbox=True,
+            resume_session=True, timeout_seconds=args.implementation_timeout_seconds, retries=1,
+            log_dir=str(AUTOMATION / "logs"),
         )
+        feedback = ""
+        if args.feedback_from:
+            prior = json.loads(args.feedback_from.read_text())
+            if not isinstance(prior, list) or any(not isinstance(row, dict) for row in prior):
+                parser.error("--feedback-from must contain a graph.json list of node reports")
+            feedback = _verification_feedback(prior, args.feedback_from.resolve())
+        loop_run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + f"-pid{os.getpid()}"
+        goal_complete = False
+        feature_ready = False
+        nic_ready = False
+        feature_linux_ready = False
+        try:
+            for iteration in range(1, args.iterations + 1):
+                run_id = f"{loop_run_id}-iter{iteration}-{args.verify}"
+                report_dir = AUTOMATION / "logs" / "feature-implementation" / run_id
+                readiness_path = report_dir / "readiness.json"
+                if args.verify == "feature-implementation":
+                    report_dir.mkdir(parents=True, exist_ok=True)
+                if args.verify == "nic-repair":
+                    _nic_repair_progress(run_id, iteration,
+                        "verification" if args.verification_first and iteration == 1 else "implementation")
+                if args.verify == "feature-linux-repair":
+                    _feature_linux_repair_progress(run_id, iteration,
+                        "verification" if args.verification_first and iteration == 1 else "implementation")
+                started_ns = time.time_ns()
+                agent.model = _live_model(args.model)
+                prompt_feedback = feedback
+                if args.verify == "feature-implementation":
+                    background_status = _feature_background_status()
+                    (report_dir / "background-status.json").write_text(json.dumps(background_status, indent=2) + "\n")
+                    prompt_feedback += "\nBackground FPGA outcomes (frozen earlier candidates):\n" + _bounded_text(
+                        json.dumps(background_status, indent=2), 8_000)
+                if args.verification_first and iteration == 1:
+                    response = CodexQueryResult(
+                        "Saved candidate submitted for fresh verification; no implementation call.\nLOOP_COMPLETE: no",
+                        0, "", "", success=True)
+                    print("Verification-first restart: checking the saved candidate before any source edits.", flush=True)
+                else:
+                    prompt = _agent_prompt(prompt_feedback, iteration, args.iterations, agent.model,
+                                           args.verify, readiness_path)
+                    if args.verify in {"nic-repair", "feature-linux-repair"}:
+                        prompt += f"\nActive repair verification YAML: {args.verification_config.resolve()}\n"
+                    print(f"\n=== Codex iteration {iteration}: PROMPT ===\n{prompt}", flush=True)
+                    response = get(agent.prompt.options(
+                        max_retries=0, retry_exceptions=False,
+                    ).chia_remote(agent, prompt))
+                    _require_codex_success(response)
+                    print(f"\n=== Codex iteration {iteration}: RESPONSE ===\n{response.result}\n", flush=True)
+                    if response.stderr:
+                        print(response.stderr, flush=True)
+                if args.verify == "feature-implementation":
+                    # This phase never dispatches the full graph or legacy
+                    # metasim manager. FPGA workers own immutable candidates.
+                    try:
+                        config = yaml.safe_load(args.verification_config.read_text())
+                        if not isinstance(config, dict):
+                            raise ValueError("verification config must be a mapping")
+                        result, reports = _feature_implementation_iteration(
+                            config, run_id, response.result, readiness_path, started_ns)
+                    except Exception as error:
+                        result = {"phase": "feature-implementation", "implementation_ready": False,
+                                  "verified_complete": False, "formal_dispatched": False,
+                                  "reason": f"{type(error).__name__}: {error}"}
+                        reports = []
+                    (report_dir / "response.txt").write_text(response.result + "\n")
+                    (report_dir / "phase-result.json").write_text(json.dumps(result, indent=2) + "\n")
+                    graph_path = report_dir / "graph.json"
+                    graph_path.write_text(json.dumps(reports, indent=2) + "\n")
+                    feedback = _bounded_text(
+                        "Feature implementation phase; overall verification remains incomplete.\n"
+                        f"Implementation result: {report_dir / 'phase-result.json'}\n"
+                        + json.dumps(result, indent=2) + "\n"
+                        + _verification_feedback(reports, graph_path)
+                        + "\nPrevious implementation response:\n"
+                        + _bounded_text(response.result, 24_000), FEEDBACK_MAX_CHARS)
+                    (report_dir / "feedback.txt").write_text(feedback + "\n")
+                    print(f"\n=== Feature implementation {iteration}: SUMMARY ===\n{feedback}\n", flush=True)
+                    if result.get("implementation_ready") is True:
+                        feature_ready = True
+                        print("Feature implementation milestone is ready. Full semantic/formal/F2/speed "
+                              "acceptance remains incomplete; formal proofs were not resumed.", flush=True)
+                        break
+                    print("Continuing feature implementation after semantic checks and background FPGA dispatch.", flush=True)
+                    continue
+                elif args.verify in {"full", "boot", "nic-repair", "feature-linux-repair"}:
+                    try:
+                        config = yaml.safe_load(args.verification_config.read_text())
+                        if not isinstance(config, dict):
+                            raise ValueError("verification config must be a mapping")
+                        if args.verify == "nic-repair":
+                            _nic_repair_progress(run_id, iteration, "verification")
+                        if args.verify == "feature-linux-repair":
+                            _feature_linux_repair_progress(run_id, iteration, "verification")
+                        reports = (_feature_linux_repair_graph(config, run_id) if args.verify == "feature-linux-repair"
+                                   else _nic_repair_graph(config, run_id) if args.verify == "nic-repair"
+                                   else _verification_graph(config, run_id))
+                    except Exception as error:
+                        reports = [{"node": "configuration", "ok": False,
+                                    "status": "failed", "reason": str(error)}]
+                    complete_gate = (_feature_linux_repair_complete(reports) if args.verify == "feature-linux-repair"
+                                     else _nic_repair_complete(reports) if args.verify == "nic-repair"
+                                     else _graph_complete(reports))
+                    report_dir = AUTOMATION / "logs" / "verification" / run_id
+                    report_dir.mkdir(parents=True, exist_ok=True)
+                    graph_path = report_dir / "graph.json"
+                    graph_path.write_text(json.dumps(reports, indent=2) + "\n")
+                    feedback = _verification_feedback(reports, graph_path)
+                    (report_dir / "feedback.txt").write_text(feedback + "\n")
+                    if args.verify == "nic-repair":
+                        phase = ("passed" if complete_gate else "cleanup-unconfirmed" if
+                                 any(row.get("workers_joined") is False for row in reports) else "repair-required")
+                        _nic_repair_progress(run_id, iteration, phase, reports)
+                    if args.verify == "feature-linux-repair":
+                        phase = ("passed" if complete_gate else "cleanup-unconfirmed" if
+                                 any(row.get("workers_joined") is False for row in reports) else "repair-required")
+                        _feature_linux_repair_progress(run_id, iteration, phase, reports)
+                else:
+                    # Legacy U250 compile/metasim remain explicit diagnostics;
+                    # they cannot establish completion of the AWS four-target goal.
+                    verification = get(verify_with_firesim.chia_remote(
+                        args.verify, run_id, False, _chia_tag=f"diagnostic-{iteration}"))
+                    feedback = _format_verification(verification)
+                    complete_gate = False
+                print(f"\n=== Verification {iteration}: SUMMARY ===\n{feedback}\n", flush=True)
+                if args.verify in {"full", "boot", "nic-repair", "feature-linux-repair"} and any(report.get("workers_joined") is False for report in reports):
+                    raise RuntimeError("Verification workers were not joined; stopping before another implementation call")
+                if args.verify == "nic-repair":
+                    if complete_gate:
+                        nic_ready = True
+                        print("All four current NIC Linux/packet/poweroff/cleanup cases passed. "
+                              "NIC runtime repair is verified; full-port acceptance remains incomplete.", flush=True)
+                        break
+                    print("NIC repair remains incomplete; joined runtime evidence feeds the next implementation turn.", flush=True)
+                    continue
+                if args.verify == "feature-linux-repair":
+                    if complete_gate:
+                        feature_linux_ready = True
+                        print("All seven current enabled-feature Linux/runtime/poweroff/cleanup cases passed. "
+                              "Integrated feature runtime verification is complete; full-port acceptance remains incomplete.", flush=True)
+                        break
+                    print("All-seven feature Linux verification remains incomplete; joined runtime evidence feeds the next implementation turn.", flush=True)
+                    continue
+                if complete_gate and GOAL_COMPLETE_RE.search(response.result):
+                    goal_complete = True
+                    print("All baseline and required-feature verification nodes passed and the main agent declared completion.", flush=True)
+                    break
+                print("Goal remains incomplete; verification evidence will inform the next implementation turn.", flush=True)
+        finally:
+            ray.shutdown()
+        if args.verify == "feature-implementation" and not feature_ready:
+            raise RuntimeError("Feature implementation iteration limit reached without evidence-backed readiness; full acceptance remains incomplete")
+        if args.verify == "nic-repair" and not nic_ready:
+            raise RuntimeError("NIC repair iteration limit reached without four current passing Linux/packet/cleanup cases")
+        if args.verify == "feature-linux-repair" and not feature_linux_ready:
+            raise RuntimeError("All-seven feature Linux repair iteration limit reached without seven current passing runtime/poweroff/cleanup cases")
+        if not goal_complete and not feature_ready and not nic_ready and not feature_linux_ready:
+            raise RuntimeError("Iteration limit reached without verified baseline, full feature scope and speed plus LOOP_COMPLETE: yes")
 
 
 if __name__ == "__main__":

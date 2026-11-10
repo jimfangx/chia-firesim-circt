@@ -1,0 +1,318 @@
+# Baseline CHIA gates plus mandatory full-port feature evidence acceptance.
+# Missing tools, incomplete proofs and runtime failures remain fail-closed.
+# No unconfigured or inconclusive gate can complete the implementation loop.
+recipes_file: automation/chia_firesim_circt/selected_config_build_recipes.yaml
+feature_scope_file: automation/chia_firesim_circt/feature_scope.yaml
+feature_evidence_root: automation/chia_firesim_circt/logs/feature-evidence
+# List tool binaries, golden manifests, untracked implementation sources, and all
+# imported config/constraint files here so changing them invalidates every gate.
+identity_files:
+  - automation/chia_firesim_circt/verification_nodes.py
+  - automation/chia_firesim_circt/feature_acceptance.py
+  - automation/chia_firesim_circt/feature_scope.yaml
+  - automation/chia_firesim_circt/loop.py
+  - sims/firesim-staging/sample_config_build_recipes.yaml
+  - automation/chia_firesim_circt/verification.yaml
+  - automation/chia_firesim_circt/downstream_common.py
+  - automation/chia_firesim_circt/run_jasper.py
+  - automation/chia_firesim_circt/jasper_timeout_cleanup.py
+  - automation/chia_firesim_circt/jasper_memory_layout.py
+  - automation/chia_firesim_circt/run_f2.py
+  - automation/chia_firesim_circt/f2_manager.py
+  - automation/chia_firesim_circt/prepare_f2_linux.py
+  - sims/firesim/deploy/workloads/br-base-uniform.json
+  - software/firemarshal/images/firechip/br-base/br-base-bin
+  - software/firemarshal/images/firechip/br-base/br-base.img
+  - automation/chia_firesim_circt/run_speed.py
+  - .conda-env/bin/python3
+  - /scratch/jfx/circt_compare/sec_flow/aliases/firesim.txt
+  - /scratch/jfx/circt_compare/sec_flow/conditions/firesim.txt
+  - /scratch/jfx/circt_compare/sec_flow/lib/AbstractClockGate.v
+  - /scratch/jfx/circt_compare/sec_flow/lib/BUFGCE.v
+  - /scratch/jfx/circt_compare/sec_flow/run_blocks.py
+  - /scratch/jfx/circt_compare/sec_flow/run_sec.py
+  - /scratch/jfx/circt_compare/sec_flow/scripts/lec_points.py
+  - /scratch/jfx/circt_compare/sec_flow/scripts/match_state.py
+  - /scratch/jfx/circt_compare/sec_flow/scripts/portmap.py
+  - /scratch/jfx/circt_compare/sec_flow/scripts/svinfo.py
+  - /scratch/jfx/circt_compare/sec_flow/scripts/vcddiff.py
+  - /scratch/jfx/circt_compare/sec_flow/scripts/vcdpeek.py
+  - /scratch/jfx/circt_compare/sec_flow/tcl/sec_lib.tcl
+  - sims/firesim/sim/goldengate-circt/test/Support/GenerateF2SFCGoldens.py
+  - sims/firesim/sim/goldengate-circt/test/Support/GenerateF2CIRCTCandidates.py
+  - sims/firesim/sim/goldengate-circt/test/Support/CompareF2Semantics.py
+  - sims/firesim/sim/goldengate-circt/test/Support/NICDriverHeaderCompare.py
+  - sims/firesim/sim/midas/src/main/verilog/BUFGCE.v
+  - .conda-env/bin/verilator
+  - .conda-env/bin/verilator_bin
+  - .conda-env/bin/c++
+  - .conda-env/libexec/gcc/x86_64-conda-linux-gnu/15.3.0/cc1plus
+  - sims/firesim/sim/goldengate-circt/CMakeLists.txt
+  - sims/firesim/sim/make/goldengate.mk
+  - /scratch/jfx/chia-nic-runtime-repair-20261107/tools/native-25b58bc1dbad5cbbf69a85eb9ec03512b710bb7f3104ca901e3f8fa638e4c781/goldengate-circt-19dadd357e38cf9113cb3aad34f050a43f82d05b083ca58a1c0bf4ec901c4ac5
+# Omit cores to use all CPUs in the worker's affinity mask. Set an explicit cap
+# when simultaneously running resource-heavy nodes; adapters must honor it.
+# cores: 32
+
+targets:
+  # With preparation enabled, sfc_artifacts are resolved from complete immutable
+  # receipts and hash-verified inventories, rather than manually filled here.
+  # CIRCT inventories likewise come from current complete candidate receipts.
+  rocket:
+    recipe: firesim_rocket_singlecore_no_nic_l2_lbp
+    sfc_artifacts: []
+    circt_artifacts: []
+  megaboomv3:
+    recipe: firesim_megaboom_singlecore_no_nic_l2_llc4mb_ddr3
+    sfc_artifacts: []
+    circt_artifacts: []
+  shuttle:
+    # Explicitly derived F2 recipe; no plain Shuttle entry exists in staging.
+    recipe: firesim_shuttle_singlecore_no_nic_l2_llc4mb_ddr3
+    sfc_artifacts: []
+    circt_artifacts: []
+  saturn_shuttle:
+    recipe: firesim_saturn_GENV256D128_shuttle_singlecore_no_nic_l2_llc4mb_ddr3
+    sfc_artifacts: []
+    circt_artifacts: []
+
+# Every adapter is {argv: [executable, argument, ...], timeout_seconds: N}.
+# Jasper alone permits N=0 for no wall deadline. Other stages require N>0.
+# Commands run in repo, with no implicit shell; use an explicit bash adapter if
+# environment sourcing is needed. Available literal argv replacements:
+# {repo}, {target}, {recipe}, {recipes_file}, {mode}, {cores}, {identity},
+# {evidence_dir}, {report}. Environment: CHIA_REPORT_PATH, CHIA_INPUT_IDENTITY,
+# CHIA_TARGET, CHIA_MODE, CHIA_CORES; MAKEFLAGS/CMAKE_BUILD_PARALLEL_LEVEL/
+# OMP_NUM_THREADS reflect the affinity-aware CPU budget. Use the same CPU budget
+# for SFC and CIRCT timing, record actual process counts and peak memory.
+#
+# Each successful command MUST create {report} as fresh JSON with:
+# {"passed": true, "target": "rocket", "input_identity": "<identity>",
+#  "scope": "precise design/top/blackboxes/assumptions and comparison scope"}
+# Additional mandatory result keys are documented beside each node below.
+# Full stdout/stderr and argv, CPU budget, exit/timeout, wall time, artifact
+# SHA256s, HEAD+dirty diff identity, and result JSON are retained per node.
+
+semantic:
+  # CHIA runs preparation before artifact identity. Complete immutable receipts
+  # are hash-verified and reused; only targets without a complete marker are
+  # generated. A partial attempt never supplies inputs. This prepares actual F2
+  # SFC outputs; it does not establish syntax/semantic parity or any proof.
+  preparation:
+    golden_root: /scratch/jfx/f2-sfc-goldens
+    command:
+      argv:
+        - bash
+        - -lc
+        - |
+          set -e
+          prep_repo=$1
+          prep_root=$2
+          prep_cores=$3
+          shift 3
+          prep_targets=("$@")
+          set --
+          source /home/ubuntu/miniforge3/etc/profile.d/conda.sh
+          cd "$prep_repo/sims/firesim"
+          source ./sourceme-manager.sh
+          exec python3 sim/goldengate-circt/test/Support/GenerateF2SFCGoldens.py \
+            --output-root "$prep_root" --threads "$prep_cores" "${prep_targets[@]}"
+        - chia-f2-sfc-preparation
+        - "{repo}"
+        - "{golden_root}"
+        - "{cores}"
+      timeout_seconds: 21600
+  # Candidate compilation belongs to CHIA, before output identity is frozen.
+  # This preparation does not establish syntax/semantic equivalence. A failed
+  # compiler invocation retains diagnostics and cannot publish a complete receipt.
+  # Build once, then compile targets sequentially within the assigned affinity;
+  # cap concurrent C++ compilation at eight for this worker's 30 GiB RAM.
+  candidate_preparation:
+    candidate_root: /scratch/jfx/chia-integrated-feature-suite-20261109/baseline-candidates-main
+    compiler: /scratch/jfx/chia-nic-runtime-repair-20261107/tools/native-25b58bc1dbad5cbbf69a85eb9ec03512b710bb7f3104ca901e3f8fa638e4c781/goldengate-circt-19dadd357e38cf9113cb3aad34f050a43f82d05b083ca58a1c0bf4ec901c4ac5
+    # Immutable compiler pin from the passing NIC candidate; rebuild and pin
+    # a new binary before changing native compiler sources.
+    command:
+      argv:
+        - "{repo}/.conda-env/bin/python3"
+        - "{repo}/sims/firesim/sim/goldengate-circt/test/Support/GenerateF2CIRCTCandidates.py"
+        - --repo
+        - "{repo}"
+        - --golden-root
+        - "{golden_root}"
+        - --output-root
+        - "{candidate_root}"
+        - --compiler
+        - "{compiler}"
+        - --threads
+        - "{cores}"
+      timeout_seconds: 21600
+  # One adapter invocation per selected target; full syntax + semantic compare
+  # against immutable SFC transform outputs, including required sidecars. Do not
+  # substitute emitted-Verilog existence, textual equality alone, or metasim.
+  # Result also requires: "syntax": true, "semantic": true.
+  # This is the pre-build static contract: all four must report verification_stage:
+  # prebuild, syntax/semantic/static_semantics true, and passing complete paired
+  # RTL plus driver syntax. Runtime/formal deferred obligations are enforced by
+  # their independent downstream nodes and do not block this pre-build stage.
+  command:
+    argv:
+      - "{repo}/.conda-env/bin/python3"
+      - "{repo}/sims/firesim/sim/goldengate-circt/test/Support/CompareF2Semantics.py"
+      - --repo
+      - "{repo}"
+      - --target
+      - "{target}"
+      - --golden-root
+      - /scratch/jfx/f2-sfc-goldens
+      - --candidate-root
+      - /scratch/jfx/chia-integrated-feature-suite-20261109/baseline-candidates-main
+    timeout_seconds: 3000
+
+jasper:
+  # Runs only after all four semantic comparisons pass. This node runs at the
+  # same time as the FireSim build/run node. Both modes are mandatory per target.
+  # SSH target: rocky@32.185.44.117 (use ~/.ssh/config); work under /scratch/jfx.
+  # Jasper: /tools/Cadence/jasper_2026.06p002/bin/jg.
+  # Example: /scratch/circt_compare (local copy /scratch/jfx/circt_compare).
+  # Example sec_flow is SEC, not evidence of an independent LEC run.
+  # Each mode result also requires: "mode": "lec" or "sec",
+  # "proof_status": "proven", "unproven_obligations": 0.
+  # The scope must enumerate assumptions/exclusions; blackboxed or bounded-only
+  # evidence must not be reported as a full-design proof.
+  # Both use the installed Jasper SEC App: lec selects state_matching
+  # (documented combinational state-cutpoint cones), sec selects sequential proof.
+  # LEC also requires authoritative complete auto-cutpoint signoff and a nonempty
+  # proven cutpoint inventory; helper/compare-point reports alone are insufficient.
+  # Whole top remains F1Shim by name on F2. Strict full signoff is required.
+  # Native memory-origin collateral is required in the current candidate receipt.
+  # Packing, capture and hierarchy are checked against emitted RTL before staged
+  # helper proposals; no initial equality or proof waiver is introduced.
+  # User-requested 128 GiB sampled process-tree RSS watchdog, one ProofGrid job.
+  # This exceeds the EDA host's ~122.7 GiB physical RAM; swap is not extra RAM.
+  # The adapter records available memory and the flow's sampled peak RSS.
+  # Memory aborts, bounded or incomplete proofs remain failed verification.
+  lec:
+    argv:
+      - "{repo}/.conda-env/bin/python3"
+      - "{repo}/automation/chia_firesim_circt/run_jasper.py"
+      - --repo
+      - "{repo}"
+      - --target
+      - "{target}"
+      - --mode
+      - lec
+      - --max-mem-gb
+      - "128"
+      - --jobs
+      - "1"
+      - --prove-time
+      - "24h"
+      - --wall-timeout-seconds
+      - "87000"
+    # 24h proof + 10m remote reporting + 10m archive/local cleanup; RSS guard stays.
+    timeout_seconds: 87600
+  sec:
+    argv:
+      - "{repo}/.conda-env/bin/python3"
+      - "{repo}/automation/chia_firesim_circt/run_jasper.py"
+      - --repo
+      - "{repo}"
+      - --target
+      - "{target}"
+      - --mode
+      - sec
+      - --max-mem-gb
+      - "128"
+      - --jobs
+      - "1"
+      - --prove-time
+      - "24h"
+      - --wall-timeout-seconds
+      - "87000"
+    # 24h proof + 10m remote reporting + 10m archive/local cleanup; RSS guard stays.
+    timeout_seconds: 87600
+
+firesim:
+  workload_template: sims/firesim/deploy/workloads/br-base-uniform.json
+  linux_max_cycles: 100000000000
+  # Initialize Conda first in SSH/login shells:
+  # source /home/ubuntu/miniforge3/etc/profile.d/conda.sh
+  # On F2 use source ./sourceme-manager.sh with SSH setup enabled; do not pass
+  # --skip-ssh-setup, which would skip loading ~/firesim.pem for run-host access.
+  # Adapter must use FireSim manager actions: buildbitstream locally, then
+  # launchrunfarm/infrasetup/runworkload with the F2 runtime run-farm YAML.
+  # Configure a local build host, never relaunch a remote build farm. Building
+  # begins after semantic pass and overlaps the independent Jasper node.
+  # Use ~/firesim.pem for direct F2 SSH only when required; keep launch and
+  # lifecycle management in the manager, and clean up run farms in finally.
+  # Result also requires booleans: local_bitstream_build, firesim_manager,
+  # f2_runfarm, workload_passed, linux_booted, poweroff_observed; workload_kind
+  # must be linux_boot_poweroff. Nonempty strings: build_log, manager_log, agfi,
+  # workload_evidence, workload_inputs. Receipt paths must be nonempty local files
+  # (stage remote logs locally); they are SHA256-hashed into node evidence.
+  # Tie AGFI/build receipts back to these CIRCT inputs.
+  # The local build starts before workload preparation. A successful build is
+  # retained as build-receipt.json with stage: pending_runtime until the manager
+  # deploys its own new AGFI and Linux userspace boots and powers off cleanly.
+  # Use built br-base assets and a private rootfs with FireMarshal's S99run hook;
+  # retain the template/base images. Require a Linux banner, userspace success,
+  # poweroff request, kernel power-down, driver PASS and script exit code zero.
+  command:
+    argv:
+      - "{repo}/.conda-env/bin/python3"
+      - "{repo}/automation/chia_firesim_circt/run_f2.py"
+      - --repo
+      - "{repo}"
+      - --target
+      - "{target}"
+    timeout_seconds: 43200
+
+feature_linux:
+  # Exactly seven enabled representatives, separate from the four baseline recipes.
+  # A baseline semantic pass permits diagnostic Linux execution. This node does
+  # not claim enabled-case semantic or Jasper acceptance; the strict feature audit
+  # still requires those stages. Set require_feature_semantic and semantic_reports
+  # when current matched enabled SFC/CIRCT prebuild producers are configured.
+  implementation_matrix: /scratch/jfx/goldengate-circt-f2-build/iteration42-feature-implementation/production-matrix-ready/matrix-result.json
+  compiler: /scratch/jfx/chia-nic-runtime-repair-20261107/tools/native-25b58bc1dbad5cbbf69a85eb9ec03512b710bb7f3104ca901e3f8fa638e4c781/goldengate-circt-19dadd357e38cf9113cb3aad34f050a43f82d05b083ca58a1c0bf4ec901c4ac5
+  generator_jar: /scratch/jfx/goldengate-circt-f2-build/iteration42-feature-implementation/firechip-bounded-features-final.jar
+  require_feature_semantic: false
+  max_pending: 1
+  stop_on_case_failure: true
+  job_timeout_seconds: 86400
+  poll_seconds: 15
+
+speed:
+  # Measure FireSim compiler wall time only: compiler launch on the same archived
+  # pre-MIDAS FIRRTL/annotations through complete emitted simulator RTL/collateral.
+  # Include compiler startup and all required compilation/transformation stages;
+  # record compiler-invoked bridge elaboration costs and cold/warm JVM conditions.
+  # Exclude simulation/workload runtime, driver execution, target generation
+  # before the compiler handoff, Vivado/bitstream builds, deployment and proofs.
+  # Use equivalent input, flags, hardware, CPU budgets, outputs and cache states.
+  # Record exact timed commands and phase boundaries in scope. Each of the FOUR
+  # targets must satisfy median CIRCT compiler time / median SFC compiler time
+  # < 1.0; no averaging away regressions or separate workflow/runtime timing gate.
+  # Result also requires positive finite sfc_seconds, circt_seconds and
+  # "timing_scope": "firesim_compiler", "equivalent_work": true;
+  # sfc_command, circt_command, cache_policy, and cores equal to CHIA_CORES.
+  # Require >=3 matched samples in "samples", each with positive
+  # sfc_seconds/circt_seconds containing only compiler wall times. The top-level
+  # timings must be the corresponding sample medians. Run speed after Jasper
+  # and F2 finish to avoid local synthesis contention. Correctness passes first.
+  # Replay the pinned SFC compiler and accepted native compiler on the same
+  # archived input. Initial processes are separate from three repeated pairs;
+  # every SFC launch is a fresh JVM. Repeated output reproduction and paired
+  # RTL/driver syntax run outside the measured interval and must all pass.
+  command:
+    argv:
+      - "{repo}/.conda-env/bin/python3"
+      - "{repo}/automation/chia_firesim_circt/run_speed.py"
+      - --repo
+      - "{repo}"
+      - --target
+      - "{target}"
+      - --repetitions
+      - "3"
+    timeout_seconds: 43200

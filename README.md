@@ -1,3 +1,9 @@
+# FireSim CIRCT port
+
+This fork contains the integrated native Golden Gate compiler and F2 feature
+workloads. Start with [REPRODUCING.md](REPRODUCING.md) for pinned dependencies,
+source builds, the required IceNet overlay and verification scope.
+
 ![CHIPYARD](https://github.com/ucb-bar/chipyard/raw/main/docs/_static/images/chipyard-logo-full.png)
 
 # Chipyard Framework [![Test](https://github.com/ucb-bar/chipyard/actions/workflows/chipyard-run-tests.yml/badge.svg)](https://github.com/ucb-bar/chipyard/actions)

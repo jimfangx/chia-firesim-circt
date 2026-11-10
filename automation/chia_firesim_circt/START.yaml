@@ -1,89 +1,77 @@
-# FireSim CIRCT Chia loop: human runbook
-
+# Human runbook. See README.md and verification.yaml for the adapter contract.
 prerequisite:
-  description: Passwordless SSH to the local manager host is required by both Chia and FireSim.
+  description: >-
+    Install CHIA/Ray/Codex in the manager environment; configure AWS F2 and local
+    Vivado. Complete the four golden/semantic, LEC, SEC, F2 and timing adapters.
+    Missing adapters intentionally block verification. The loop does not claim
+    that these tools or compiler F2 support are already available. On F2 source
+    sourceme-manager.sh without --skip-ssh-setup; SSH key setup is required.
   commands: |
-    ssh -o BatchMode=yes 127.0.0.1 true
+    source /home/ubuntu/miniforge3/etc/profile.d/conda.sh
+    cd /scratch/jfx/fsim-circt/sims/firesim
+    source ./sourceme-manager.sh
     ssh -o BatchMode=yes localhost true
-
+    ssh -o BatchMode=yes eda true
+    command -v chia
+    command -v codex
+    python -c 'import ray, chia, yaml'
 start_cluster:
   commands: |
-    source /home/firesim/miniforge3/etc/profile.d/conda.sh
+    source /home/ubuntu/miniforge3/etc/profile.d/conda.sh
     cd /scratch/jfx/fsim-circt/sims/firesim
-    source ./sourceme-manager.sh --skip-ssh-setup
+    source ./sourceme-manager.sh
     cd /scratch/jfx/fsim-circt
     mkdir -p sims/firesim/deploy/build-farm sims/firesim/deploy/run-farm
     chia up automation/chia_firesim_circt/cluster.yaml
     chia status --chia-cluster automation/chia_firesim_circt/cluster.yaml
-
 job_submission:
   description: >-
-    This is a localhost shared-checkout cluster. Do not add
-    --working-dir /scratch/jfx/fsim-circt: Ray would package and upload the
-    35 GiB checkout, while the worker already has that exact path mounted.
-  command_shape: >-
-    chia job submit -- python /scratch/jfx/fsim-circt/automation/chia_firesim_circt/loop.py <loop-options>
-
+    Current November 3 verification restart; verify the saved candidate first.
+    Shared checkout; omit --working-dir to avoid uploading the entire tree.
+  command: |
+    chia job submit -- python /scratch/jfx/fsim-circt/automation/chia_firesim_circt/loop.py --iterations 9999 --verify full --verification-first --implementation-timeout-seconds 14400 --model gpt-6.1-sol
+verification:
+  description: >-
+    Exactly Rocket, MegaBoomV3, plain Shuttle, and Saturn Shuttle. Semantic success
+    fans out separate Jasper LEC+SEC and local-build/F2 manager nodes. Join both,
+    then compare SFC/CIRCT FireSim compiler wall time, from pre-MIDAS inputs to
+    emitted simulator RTL/collateral, without Vivado contention. Simulation or
+    workload runtime is excluded from the speed metric. The main agent
+    joins all subagents before returning; no source edits occur during verification.
+    FAME5, enabled AutoCounter/Print, multi-clock/generalized models and NIC are
+    required full-port streams in feature_scope.yaml; QSFP is deferred. Prefer
+    concurrent owners when dependencies allow. Each enabled representative must
+    pass semantic comparison, LEC and SEC, and feature-exercising Linux boot and
+    poweroff. The features audit must pass along with all baseline nodes for the
+    same candidate; LOOP_COMPLETE: yes cannot accept a baseline-only result.
+    No Rocket streak or full sample-recipe enumeration.
+feature_implementation:
+  description: >-
+    Historical November 2 development phase, superseded by the November 3 full
+    verification restart above. In this mode formal stays disabled. Each completed coding turn runs the exact four
+    baseline semantic checks. Passing candidates are frozen into isolated F2
+    background jobs; implementation immediately continues without joining FPGA
+    execution. Failed semantics return to repair. Feature implementation readiness
+    requires actual production artifacts and successful command receipts; it
+    does not establish final formal, Linux or compiler-speed acceptance.
+  command: |
+    chia job submit -- python /scratch/jfx/fsim-circt/automation/chia_firesim_circt/loop.py --iterations 9999 --verify feature-implementation --model gpt-6.1-sol
+  background_evidence: automation/chia_firesim_circt/logs/background-f2/
+  implementation_evidence: automation/chia_firesim_circt/logs/feature-implementation/
 model:
-  default: Codex CLI default model
-  per_loop_override: --model <model-name>
-  example: --model <your-codex-model>
   live_control_file: automation/chia_firesim_circt/control.yaml
-  live_change: Change `model` in control.yaml; the next Codex iteration uses it without restarting the job.
-
-preflight:
-  description: Verify Chia, Codex CLI, FireSim CLI, and configuration without compiling RTL.
+  per_loop_override: --model <model-name>
+  description: control.yaml is reread before each implementation call.
+diagnostics:
+  description: Legacy U250 compile/metasim checks are available but cannot complete the new goal.
   command: |
-    chia job submit -- \
-      python /scratch/jfx/fsim-circt/automation/chia_firesim_circt/loop.py --iterations 1 --verify preflight
-  with_model: |
-    chia job submit -- \
-      python /scratch/jfx/fsim-circt/automation/chia_firesim_circt/loop.py --iterations 1 --verify preflight --model <model-name>
-
-autonomous_full_loop:
-  description: >-
-    One bounded autonomous task. Codex focuses on the core Golden Gate
-    compiler under sims/firesim/sim, using the Scala SFC implementation as the
-    oracle and FIRESIM_CIRCT_PORT_PLAN.md as its milestone order. Automation,
-    FireMarshal, workloads, Python helpers, runtime YAML, and Ray/Chia plumbing
-    are strongly discouraged unless minimally required to unblock a core change
-    or golden comparison; they never count as porting work on their own. Each
-    core change compares its candidate output with the relevant recorded SFC
-    golden artifact. Each iteration then runs replacertl
-    compile, a bounded bare-metal Verilator
-    metasimulation (volatile-memory checksum, UART PASS marker, tohost exit),
-    and enables FireSim tracing. The U250 Linux build/boot gate runs only after
-    15 consecutive bare-metal passes; any bare or hardware failure resets the
-    streak. A failed gate is supplied to the next iteration. A full pass
-    continues porting until Codex explicitly emits LOOP_COMPLETE: yes after a
-    scheduled hardware pass; the FireMarshal poweroff workload cleanly powers
-    down Buildroot, then run-farm termination runs before the next iteration.
-  command: |
-    chia job submit -- \
-      python /scratch/jfx/fsim-circt/automation/chia_firesim_circt/loop.py --iterations 12 --verify full
-  with_model: |
-    chia job submit -- \
-      python /scratch/jfx/fsim-circt/automation/chia_firesim_circt/loop.py --iterations 12 --verify full --model <model-name>
-
-baremetal_metasim:
-  description: >-
-    Faster functional compiler gate: compile transformed RTL, run the small
-    bare-metal checksum program under Verilator, require its UART PASS marker,
-    and terminate the metasim run farm. It does not build a U250 bitstream or
-    boot Linux.
-  command: |
-    chia job submit -- \
-      python /scratch/jfx/fsim-circt/automation/chia_firesim_circt/loop.py --iterations 1 --verify metasim
-
-stop_previous_job:
-  description: >-
-    Stop a previous loop before replacing it. Stopping preserves source edits
-    in the shared checkout and retains logs. Deleting is optional and removes
-    only stopped-job Ray metadata.
+    chia job submit -- python /scratch/jfx/fsim-circt/automation/chia_firesim_circt/loop.py --iterations 1 --verify preflight
+stop:
   commands: |
     chia job list
     chia job stop <job-id>
-    chia job delete <job-id>  # optional, after it has stopped
-
-stop_cluster:
-  command: chia down automation/chia_firesim_circt/cluster.yaml
+    chia down automation/chia_firesim_circt/cluster.yaml
+  description: >-
+    Allow the FireSim adapter to clean up its tagged F2 run farm before stopping.
+    If a process is forcibly killed, inspect manager state and terminate its farm
+    explicitly. Stop the old job before changing/replacing the local cluster.

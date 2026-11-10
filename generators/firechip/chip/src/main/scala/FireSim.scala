@@ -25,6 +25,8 @@ import midas.targetutils.{MemModelAnnotation, EnableModelMultiThreadingAnnotatio
 
 case object FireSimMultiCycleRegFile extends Field[Boolean](false)
 case object FireSimFAME5 extends Field[Boolean](false)
+// Bounded feature representatives observe real domain clocks without changing targets.
+case object FireSimFeatureChecks extends Field[Boolean](false)
 
 /**
   * Under FireSim's current multiclock implementation there can be only a
@@ -33,6 +35,7 @@ case object FireSimFAME5 extends Field[Boolean](false)
   * memoize its instantiation such that it can be referenced from within a ClockScheme function.
   */
 class FireSimClockBridgeInstantiator extends HarnessClockInstantiator {
+  var featureReset: Option[Bool] = None
   // connect all clock wires specified to the RationalClockBridge
   def instantiateHarnessClocks(refClock: Clock, refClockFreqMHz: Double): Unit = {
     val sinks = clockMap.map({ case (name, (freq, bundle)) =>
@@ -65,8 +68,9 @@ class FireSimClockBridgeInstantiator extends HarnessClockInstantiator {
       (RationalClock(names.mkString(","), 1, pllConfig.referenceFreqMHz.toInt / freqMHz), clock)
     }.toSeq
     val clockBridge = Module(new RationalClockBridge(ratClocks.map(_._1)))
-    (clockBridge.io.clocks zip ratClocks).foreach { case (clk, rat) =>
+    (clockBridge.io.clocks zip ratClocks).zipWithIndex.foreach { case ((clk, rat), domain) =>
       rat._2 := clk
+      featureReset.foreach(reset => CIRCTFeatureMonitor.instantiate(clk, reset, domain))
     }
   }
 }
@@ -108,6 +112,10 @@ class FireSim(implicit val p: Parameters) extends RawModule with HasHarnessInsta
   def success = { require(false, "success should not be used in Firesim"); false.B }
 
   override val supportsMultiChip = true
+
+  if (p(FireSimFeatureChecks))
+    harnessClockInstantiator.asInstanceOf[FireSimClockBridgeInstantiator].featureReset =
+      Some(resetBridge.io.reset)
 
   val chiptops = instantiateChipTops()
 

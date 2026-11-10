@@ -1,0 +1,77 @@
+diff --git a/src/main/scala/Configs.scala b/src/main/scala/Configs.scala
+index 743c915..9d64f22 100644
+--- a/src/main/scala/Configs.scala
++++ b/src/main/scala/Configs.scala
+@@ -38,3 +38,9 @@ class WithIceNIC(inBufFlits: Int = 1800, usePauser: Boolean = false, ctrlQueueDe
+ class WithNoIceNIC extends Config((site, here, up) => {
+   case NICKey => None
+ })
++
++// Enable two real IceNIC peripherals while retaining the NICKey-selected
++// geometry. Compose with WithIceNIC/FireSim WithNIC for target enablement.
++class WithTwoIceNIC extends Config((site, here, up) => {
++  case NICCountKey => 2
++})
+diff --git a/src/main/scala/NIC.scala b/src/main/scala/NIC.scala
+index 2654e29..75f37f6 100644
+--- a/src/main/scala/NIC.scala
++++ b/src/main/scala/NIC.scala
+@@ -45,6 +45,9 @@ case class NICAttachParams(
+ )
+ 
+ case object NICKey extends Field[Option[NICConfig]](None)
++// Retain NICKey's established per-device geometry and the first device's ABI.
++// Two physical peripherals provide independent DMA, MMIO, IRQ and Linux rings.
++case object NICCountKey extends Field[Int](1)
+ case object NICAttachKey extends Field[NICAttachParams](NICAttachParams())
+ 
+ trait HasNICParameters {
+@@ -551,33 +554,40 @@ trait CanHavePeripheryIceNIC  { this: BaseSubsystem =>
+   private val portName = "Ice-NIC"
+ 
+ 
+-  val icenicOpt = p(NICKey).map { params =>
++  private val nicCount = p(NICCountKey)
++  require(nicCount >= 1 && nicCount <= 2,
++    "IceNIC supports one or two peripherals in its reserved MMIO aperture")
++  val icenicSeq = p(NICKey).toSeq.flatMap { params => (0 until nicCount).map { index =>
+     val manager = locateTLBusWrapper(p(NICAttachKey).slaveWhere)
+     val client = locateTLBusWrapper(p(NICAttachKey).masterWhere)
+     // TODO: currently the controller is in the clock domain of the bus which masters it
+     // we assume this is same as the clock domain of the bus the controller masters
+-    val domain = manager.generateSynchronousDomain.suggestName("icenic_domain")
++    val suffix = if (index == 0) "" else s"_$index"
++    val domain = manager.generateSynchronousDomain.suggestName(s"icenic_domain$suffix")
+ 
+-    val icenic = domain { LazyModule(new IceNIC(address, manager.beatBytes)) }
++    val icenic = domain { LazyModule(new IceNIC(address + index * 0x1000, manager.beatBytes)) }
+ 
+-    manager.coupleTo(portName) { icenic.mmionode := TLFragmenter(manager.beatBytes, manager.blockBytes) := _ }
+-    client.coupleFrom(portName) { _ :=* icenic.dmanode }
++    manager.coupleTo(s"$portName$suffix") { icenic.mmionode := TLFragmenter(manager.beatBytes, manager.blockBytes) := _ }
++    client.coupleFrom(s"$portName$suffix") { _ :=* icenic.dmanode }
+     ibus.fromSync := icenic.intnode
+ 
+     val inner_io = domain { InModuleBody {
+-      val inner_io = IO(new NICIOvonly).suggestName("nic")
++      val inner_io = IO(new NICIOvonly).suggestName(s"nic$suffix")
+       inner_io <> NICIOvonly(icenic.module.io.ext)
+       inner_io
+     } }
+ 
+     val outer_io = InModuleBody {
+-      val outer_io = IO(new ClockedIO(new NICIOvonly)).suggestName("nic")
++      val outer_io = IO(new ClockedIO(new NICIOvonly)).suggestName(s"nic$suffix")
+       outer_io.bits <> inner_io
+       outer_io.clock := domain.module.clock
+       outer_io
+     }
+     outer_io
+-  }
++  } }
++  // Keep the original singleton accessor for existing integrations. The
++  // production Chipyard IO binder uses icenicSeq so no second device is lost.
++  val icenicOpt = icenicSeq.headOption
+ }
+ 
+ 

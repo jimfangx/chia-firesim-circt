@@ -321,3 +321,6 @@ cd "$RDIR"
 if [ ! -f ./software/firemarshal/marshal-config.yaml ]; then
   echo "firesim-dir: '../../sims/firesim/'" > ./software/firemarshal/marshal-config.yaml
 fi
+
+# Apply the pinned, versioned CIRCT integration overlay before elaboration.
+"$RDIR/scripts/apply-firesim-circt-patches.sh"

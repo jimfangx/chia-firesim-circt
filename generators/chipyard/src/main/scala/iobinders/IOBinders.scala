@@ -462,12 +462,13 @@ class WithBlockDeviceIOPunchthrough extends OverrideIOBinder({
 
 class WithNICIOPunchthrough extends OverrideIOBinder({
   (system: CanHavePeripheryIceNIC) => {
-    val ports: Seq[NICPort] = system.icenicOpt.map({ n =>
+    val ports: Seq[NICPort] = system.icenicSeq.zipWithIndex.map({ case (n, index) =>
       val p = GetSystemParameters(system)
-      val port = IO(new ClockedIO(new NICIOvonly)).suggestName("nic")
+      val name = if (index == 0) "nic" else s"nic_$index"
+      val port = IO(new ClockedIO(new NICIOvonly)).suggestName(name)
       port <> n
       NICPort(() => port, p(NICKey).get)
-    }).toSeq
+    })
     (ports, Nil)
   }
 })

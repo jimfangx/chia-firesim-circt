@@ -38,7 +38,7 @@ public:
 
   void init() override;
   void tick() override;
-  void finish() override {}
+  void finish() override;
 
 private:
   const SIMPLENICBRIDGEMODULE_struct mmio_addrs;
@@ -58,6 +58,18 @@ private:
 
   // checking for token loss
   int currentround = 0;
+
+  // A published outgoing batch remains owned while the peer responds. Poll
+  // once per tick so another NIC, TSI and the heartbeat can still run.
+  bool waiting_for_peer = false;
+  uint64_t pending_peer_wait_ticks = 0;
+  // A completed peer reply remains owned until its entire stream batch is
+  // accepted. push() is nonblocking and may return zero under backpressure.
+  bool pending_to_fpga = false;
+  uint64_t pending_push_retries = 0;
+  uint64_t completed_rounds = 0;
+  unsigned backpressure_logs = 0;
+  bool pending_backpressure_logged = false;
 
   // only for TOKENVERIFY
   const int stream_to_cpu_idx;

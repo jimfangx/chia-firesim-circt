@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "distribution": "Ubuntu 24.04 Noble",
+  "host_architecture": "amd64",
+  "packages": [
+    {
+      "package": "binutils-riscv64-linux-gnu",
+      "version": "2.42-4ubuntu2.10",
+      "architecture": "amd64",
+      "sha256": "91a73e7b44662a072605a1973d2b43d608d12e16d599c1422f39b949d3214930",
+      "bytes": 1425246
+    },
+    {
+      "package": "cpp-13-riscv64-linux-gnu",
+      "version": "13.3.0-6ubuntu2~24.04.1cross1",
+      "architecture": "amd64",
+      "sha256": "5c1ad931ca7114a91518808e0a5b390f830db3edc111c8e9b4f97ca1662802c3",
+      "bytes": 10007770
+    },
+    {
+      "package": "gcc-13-riscv64-linux-gnu-base",
+      "version": "13.3.0-6ubuntu2~24.04.1cross1",
+      "architecture": "amd64",
+      "sha256": "a2f3b28a4621da51926cce3524b4b502032f3d160586e29b426ce7d8ff31a23d",
+      "bytes": 51848
+    },
+    {
+      "package": "gcc-13-riscv64-linux-gnu",
+      "version": "13.3.0-6ubuntu2~24.04.1cross1",
+      "architecture": "amd64",
+      "sha256": "5f53e45ad9cf19269750560573572c6db1c5ee024d5a011d70c32fc267a4fdef",
+      "bytes": 19269540
+    },
+    {
+      "package": "gcc-riscv64-linux-gnu",
+      "version": "4:13.2.0-7ubuntu1",
+      "architecture": "amd64",
+      "sha256": "266cbd448a1e59381db165d2d55afb0c8a6745cf94d54522f5857d698d5db17f",
+      "bytes": 1212
+    },
+    {
+      "package": "libatomic1-riscv64-cross",
+      "version": "14.2.0-4ubuntu2~24.04.1cross1",
+      "architecture": "all",
+      "sha256": "e03909d2efda88ad6875a1f177ec476cc7c868ebfb4bb7f9e5d9c0339b03e29a",
+      "bytes": 9606
+    },
+    {
+      "package": "libc6-dev-riscv64-cross",
+      "version": "2.39-0ubuntu8cross1",
+      "architecture": "all",
+      "sha256": "aa4e752b0cbd32902ec0835cc4f9dc464030c329eda1fb0349e5774acda77f20",
+      "bytes": 3500990
+    },
+    {
+      "package": "libc6-riscv64-cross",
+      "version": "2.39-0ubuntu8cross1",
+      "architecture": "all",
+      "sha256": "d0eabe13dbb68e914aa0485da0d4b28843bd80b5066d801cf34d4c00e5b61df2",
+      "bytes": 1243500
+    },
+    {
+      "package": "libgcc-13-dev-riscv64-cross",
+      "version": "13.3.0-6ubuntu2~24.04.1cross1",
+      "architecture": "all",
+      "sha256": "fb0fe93ed67202f6c39704203399dd3a4e90fa72254eb0f2328dba1c13277a19",
+      "bytes": 1711792
+    },
+    {
+      "package": "libgcc-s1-riscv64-cross",
+      "version": "14.2.0-4ubuntu2~24.04.1cross1",
+      "architecture": "all",
+      "sha256": "288fd6ebaf9fe898bde7f624767b870ea705af3e95f9e6b7548162d3502dd7f4",
+      "bytes": 62966
+    },
+    {
+      "package": "linux-libc-dev-riscv64-cross",
+      "version": "6.8.0-25.25cross1",
+      "architecture": "all",
+      "sha256": "d21675d3b0b8865733f03eb50408d776d8d8da4ec71409ac7238ffeaf08b56bc",
+      "bytes": 1370362
+    },
+    {
+      "package": "qemu-user",
+      "version": "1:8.2.2+ds-0ubuntu1.18",
+      "architecture": "amd64",
+      "sha256": "9655f3e7e50af597e1b845822c47af9231f9f1bcb8c99e586db9da775d70c041",
+      "bytes": 9634742
+    }
+  ]
+}

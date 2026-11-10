@@ -1,2 +1,5 @@
 conda-reqs/conda-lock-reqs/conda-requirements-riscv-tools-linux-64-lean.conda-lock.yml linguist-generated=true
 conda-reqs/conda-lock-reqs/conda-requirements-riscv-tools-linux-64.conda-lock.yml linguist-generated=true
+
+# Diff context whitespace is part of the versioned source overlay.
+patches/icenet/*.patch -whitespace

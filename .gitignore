@@ -31,3 +31,14 @@ project/project/
 .vscode/
 tests/build/
 conda-reqs/chipyard-base.yaml.bak
+
+# Local FireSim CIRCT verification products
+__pycache__/
+*.pyc
+*.pb
+automation/chia_firesim_circt/logs/
+automation/chia_firesim_circt/migration-handoff/
+automation/chia_firesim_circt/*.lock
+automation/chia_firesim_circt/golden/*
+!automation/chia_firesim_circt/golden/.gitignore
+/.local/
