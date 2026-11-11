@@ -1,3 +1,144 @@
+# WithMultiCycleRamModels SFC parity repairs — November 11, 2026
+
+The bounded SFC source/executable audit found and repaired these supported-case
+gaps in the native async RAM path:
+
+* Model promotion now reserves existing module port names and moves actual
+  retained target selectors through every promoted instance context. Duplicate
+  records keep their order; constructor/description/format strings stay opaque.
+* Hierarchical selected-port `DontTouch` targets now retain their terminal leaf
+  identity through aggregate lowering, FAME channelization, transport activation
+  and RAM materialization. Invalid hierarchy edges and unsupported native-only
+  symbol/attached-annotation relocation reject before deleting their identities.
+* Shared input channels use per-command delivery state. A token is acknowledged
+  only after all consumers have accepted it, including serialized commands with
+  non-overlapping ready pulses. Host reset clears delivery state, not memory.
+* Distinct read-response fields sharing an output channel use a complete valid/
+  ready join. An incomplete packet cannot escape when read commands arrive at
+  different times. Multiple producers of the same payload field still reject.
+
+Portable generated-RTL regressions are registered as
+`goldengate-multicycle-ram-sharing` and
+`goldengate-multicycle-ram-response-join`. They compare real SFC references on
+defined safe cases and use independent initialized-model-memory scoreboards for
+skewed traffic, backpressure, repeated tokens and in-flight host resets. Negative
+controls detect dropped/duplicated responses, premature input acknowledgements
+and premature output packets. These bounded model tests do not zero target DRAM.
+Both repaired extraction fixtures also match complete SFC annotation arrays
+exactly at extraction and LowForm; the selected-RAM regression exercises the
+entire retained-target path through native RAM materialization.
+
+Do not reproduce the SFC bugs found by these probes: partial input sharing can
+lose tokens, grouped output valid can expose stale fields, and the mutable-set
+construction gives unstable logical-port-to-host-index ordering. Native command
+order remains deterministic. Host arbitration/index timing and source memory
+write collisions with undefined original behavior cannot establish a blanket
+whole-design equivalence claim. SFC itself rejects combined read/write ports,
+empty command vectors, non-UInt payloads and inconsistent port widths; these are
+not missing native feature cases. No additional concrete SFC-defined-behavior
+gap emerged from this bounded audit, which is not an exhaustive proof.
+
+Exactly four matched enabled designs compile after these repairs. RTL logic,
+bridge/model annotations and runtime collateral match the prior checked
+candidates. Only source-location comments retained during RAM-instance cloning
+change Rocket/MegaBoomV3 RTL bytes and their validated memory-origin binding
+hashes. The two Shuttle outputs remain byte identical. Preserve the evidence in
+`/scratch/jfx/mcram-parity-implementation-20261111/` and the executable SFC audit in
+`/scratch/jfx/mcram-parity-audit-20261111/`. Full-top Jasper LEC/SEC and enabled
+F2/Linux signoff remain open; the checked symbolic initial-memory relation and
+existing full-top ACK/transport obligations below still apply.
+
+# Configurable multi-cycle RAM models — November 11, 2026
+
+`WithMultiCycleRamModels`, `MCRams`, the native
+`--enable-multicycle-ram-models` flag and make's
+`GOLDENGATE_CIRCT_MULTICYCLE_RAM_MODELS=enabled` now enable the optional selected
+RAM flow. Default-off behavior is preserved. The production path uses the
+generalized FAME graph, including other models and FAME5, then discovers and
+materializes selected wrappers from typed memory-port annotations. Geometry and
+port counts are inferred; no target-specific names, dimensions or selection
+counts are encoded. Multiple replacements commit atomically.
+
+Matched enabled SFC/native builds now exist for exactly Rocket, MegaBoomV3,
+plain Shuttle and Saturn Shuttle. Rocket preserves `BaseF2Config`; the other
+three preserve `WithAutoILA_FRFCFS16GBQuadRankLLC4MB_BaseF2Config`, with
+`WithMultiCycleRamModels` prepended on both sides. Earlier enabled native
+replays used `BaseF2Config` for all four and establish compilation only, not
+matched SFC equivalence. Combined multiclock/AutoCounter/Print and four-thread
+FAME5 representatives also compile. Rocket selects one RAM
+definition, MegaBoomV3 two, and the two Shuttle representatives none. These are
+observed test results, not compiler selection rules. The four-thread case
+retains four shared logical threads. A fresh enabled Rocket SFC reference and
+the generalized native output pass a parameterized RTL differential test over
+2,032 transactions, 8,237 host cycles and 5,219 initialized response-data checks,
+including masks, disabled writes and backpressure; a disabled-write mutant
+fails. The optimized SFC model removes target-reset inputs, so that differential
+does not establish target-reset coverage. Unwritten memory stays unspecified.
+
+The model follows SFC's async register-file RAM contract; it does not introduce
+a replacement model for arbitrary original latencies. Unsupported port ABIs
+fail explicitly. Enabled F2 Linux/runtime and Jasper signoff remain pending.
+Evidence, including earlier failed topology attempts, is retained under
+`/scratch/jfx/multicycle-ram-models-20261111/`.
+
+Full-design equivalence is a separate acceptance gate. Compare complete emitted
+RTL, real driver headers, public interfaces, bridge/model channel contracts and
+resolved clock paths for the four matched profiles. Preserve aggregate-instance
+namespace rules and retarget only actual annotation selectors. Use immutable
+feature-specific Jasper manifests for both full-top LEC and SEC; never silently
+reuse a baseline proof. Complete signoff must include the selected RAMs and
+all other observable design state. Shared symbolic initial-memory correspondence
+requires checked identities and transition relations; neither independent
+uninitialized memories nor a layout helper proves equivalence. Do not initialize
+DRAM to make comparisons pass, or waive a defined behavioral mismatch.
+
+Current full-design work and its staged proof bundles are retained under
+`/scratch/jfx/mcram-full-equivalence-20261111/`. Staging, syntax checks and
+RAM-model differential simulation are development evidence, not Jasper signoff.
+
+The final enabled compiler passes static compatibility and actual typed
+endpoint/clock-route checks for all four profiles: 320 channels, no naming
+deltas. Complete RTL/driver syntax checks and both Jasper staging modes pass
+for each. Rocket's 2R/1W 64-bit RAM and MegaBoomV3's 6R/4W 65-bit and 12R/6W
+64-bit RAMs pass generated-RTL differential simulation, including defined
+multiwriter collisions and subsequent reads; a highest-writer mutant fails.
+These tests compare initialized model data only, not arbitrary live unwritten
+memory. Native instance namespace handling now preserves zero-width deletion,
+native symbols, valid unique names and final annotation identities. In a
+default-disabled Rocket replay, only three internal divide/square-root instance
+labels change; other RTL text and runtime collateral are unchanged, and memory
+origin records differ only in their RTL binding hash. Earlier byte-identical
+default-disabled results predate this namespace compatibility fix.
+
+Strict SFC contract equality remains false for the existing native F2
+explicit-ACK protocol extension; static compatibility does not waive its
+behavioral proof. Full-top LEC/SEC also needs complete checked symbolic
+initial-memory correspondence, which the current single read-buffer provenance
+record does not provide. Extend logical-memory origins and both emitted storage
+decoders, validate a total address/bit bijection, couple corresponding arbitrary
+initial cells, and prove preservation under actual clocks, reset, masks and
+collision rules. Retain the full boundary and cutpoint obligations. Do not
+fabricate a relation certificate from names or assume helper equalities.
+
+# Native CHIRRTL handoff — November 11, 2026
+
+Production FireSim now consumes Chipyard's native `.fir` output directly through
+CIRCT. The target makefrag no longer requests `--emit-legacy-sfc` or links the
+FIRRTL2-emitted `.sfc.fir`. Chisel elaboration remains Scala. The importer removes
+only a complete matching mirrored annotation array before GG passes, preserving
+intentional duplicate annotations and distinct embedded/sidecar payloads.
+
+Exactly four baseline replays passed: Rocket, MegaBoomV3, plain Shuttle and
+Saturn Shuttle. Native and legacy-input RTL code is identical with comments
+excluded; runtime headers and other collateral are byte identical. Memory-origin
+records are identical, with updated binding hashes verified against the actual
+emitted RTL (source comments differ). A fresh native-only Rocket elaboration
+and full compilation passed without producing `.sfc.fir`; native-input assertion
+compilation also passed with the same assertion runtime header. Annotation
+handoff tests and a stale-symlink make regression pass. Evidence is under
+`/scratch/jfx/native-chirrtl-input-20261111/`. Separate SFC golden tooling retains
+explicit legacy emission for reference comparisons.
+
 # Synthesized assertions — November 11, 2026
 
 The opt-in `WithSynthAsserts`/`--enable-synth-asserts` native path now implements:

@@ -24,6 +24,7 @@ import tarfile
 import uuid
 
 from downstream_common import inputs, record, write
+from jasper_feature_inputs import load_feature_inputs
 from jasper_contract import stage_boundary_contract, validate_configuration, audit_initial_relation
 from jasper_memory_layout import (recover_capture_layouts, validate_origins,
                                   stage_memory_layout_adapter, stage_helper_cex_reporter)
@@ -339,6 +340,11 @@ def build_parser():
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--target", required=True)
     parser.add_argument("--mode", choices=("lec", "sec"), required=True)
+    parser.add_argument("--input-manifest", type=Path,
+                        help="explicit hash-bound feature input manifest; never falls back to baseline receipts")
+    parser.add_argument("--profile", help="exact PLATFORM_CONFIG required with --input-manifest")
+    parser.add_argument("--stage-only", action="store_true",
+                        help="validate and stage local proof inputs only; never contacts SSH or starts Jasper")
     parser.add_argument("--flow", type=Path, default=Path("/scratch/jfx/circt_compare/sec_flow"))
     parser.add_argument("--host", default="eda")
     parser.add_argument("--jg", default="/tools/Cadence/jasper_2026.06p002/bin/jg")
@@ -357,15 +363,34 @@ def build_parser():
     return parser
 
 
+def proof_inputs(args, expected_identity=None):
+    """Keep default baseline lookup and explicit feature lookup disjoint."""
+    if args.input_manifest is not None:
+        if not args.profile:
+            raise ValueError("--input-manifest requires explicit --profile")
+        return load_feature_inputs(args.input_manifest, args.target, args.profile, expected_identity)
+    if args.profile:
+        raise ValueError("--profile requires --input-manifest")
+    return inputs(args.repo, args.target)
+
+
 def main():
     parser = build_parser()
     args = parser.parse_args()
+    if args.input_manifest is not None and not args.profile or args.profile and args.input_manifest is None:
+        parser.error("--input-manifest and --profile must be supplied together")
+    if args.stage_only and args.preflight:
+        parser.error("choose --stage-only or --preflight")
     ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", args.host]
     for required in ("run_sec.py", "tcl/sec_lib.tcl", "scripts/match_state.py"):
         if not (args.flow / required).is_file():
             parser.error(f"missing existing formal flow: {args.flow / required}")
-    subprocess.run(ssh + ["test -x " + shlex.quote(args.jg) + " && test -r " + shlex.quote(args.license_script)],
-                   check=True, timeout=25)
+    if not args.stage_only:
+        if args.input_manifest is not None:
+            # Reject mismatched snapshots even for read-only preflight.
+            proof_inputs(args, os.environ.get("CHIA_INPUT_IDENTITY"))
+        subprocess.run(ssh + ["test -x " + shlex.quote(args.jg) + " && test -r " + shlex.quote(args.license_script)],
+                       check=True, timeout=25)
     if args.preflight:
         print("Jasper executable, license setup and local flow available; no proof run")
         return 0
@@ -400,7 +425,15 @@ def main():
                                    "pp.49,54-55; jasper_command_reference.pdf check_sec pp.562,609,615"}}
     write(report_path, result)
     try:
-        design = inputs(args.repo, args.target)
+        design = proof_inputs(args, result["input_identity"])
+        if args.input_manifest is not None:
+            result["feature_inputs"] = {
+                "manifest": record(design["input_manifest"]), "profile": design["profile"],
+                "recipe_name": design["recipe_name"], "recipe": design["recipe"],
+                "input_design_identity": design["input_design_identity"],
+                "input_artifacts": [record(path) for path in design["input_artifacts"]],
+                "sfc_artifacts": [record(path) for path in design["sfc"]],
+                "circt_artifacts": [record(path) for path in design["circt"]]}
         bundle = directory / "bundle"
         bundle.mkdir()
         shutil.copytree(args.flow, bundle / "sec_flow", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
@@ -419,7 +452,13 @@ def main():
         result["input_files"] = [record(design[key]) for key in ("sfc_rtl", "circt_rtl")]
         result["input_files"].append(result["native_memory_correspondence"]["collateral"])
         result["flow_files"] = [record(path) for path in sorted((bundle / "sec_flow").rglob("*")) if path.is_file()]
-        remote = f"/scratch/jfx/chia-formal/{uuid.uuid4().hex}-{args.target}-{args.mode}"
+        if args.stage_only:
+            result["proof_status"] = "staged_not_run"
+            write(report_path, result)
+            print(f"Full-top proof inputs staged at {bundle}; Jasper was not started; equivalence remains unproven")
+            return 0
+        case_prefix = "feature-" if args.input_manifest is not None else ""
+        remote = f"/scratch/jfx/chia-formal/{case_prefix}{uuid.uuid4().hex}-{args.target}-{args.mode}"
         archive = directory / "formal-inputs.tar"
         with tarfile.open(archive, "w") as stream:
             stream.add(bundle, arcname="bundle")

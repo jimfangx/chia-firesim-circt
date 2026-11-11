@@ -73,6 +73,52 @@ builds and direct RTL builds. The manager explicitly selects CIRCT, and the make
 rules reject SFC selection. Separate golden-reference tools invoke Scala SFC
 directly for comparisons.
 
+Production elaboration uses Chipyard's native Chisel/CIRCT CHIRRTL output
+(`<name>.fir`) directly. It does not request `--emit-legacy-sfc` or run the
+FIRRTL2 compatibility emitter. Chisel elaboration still runs in Scala; the
+FireSim transformations and RTL generation run in `goldengate-circt`. Native
+CHIRRTL embeds the annotation array also written to `<name>.anno.json`. The
+importer consumes matching mirrored arrays once, preserving intentional repeats
+within each array. Separate golden-reference tools may explicitly request the
+legacy `.sfc.fir` format for SFC comparisons.
+
+Enable the optional multi-cycle RAM models with `WithMultiCycleRamModels` (or
+its `MCRams` alias) in `PLATFORM_CONFIG`, or
+`GOLDENGATE_CIRCT_MULTICYCLE_RAM_MODELS=enabled` in make. Direct compiler calls
+accept `--enable-multicycle-ram-models`. The default remains disabled. The
+enabled path extracts memories selected by `FirrtlMemModelAnnotation`, carries
+them through the generalized FAME model graph, and materializes SFC-compatible
+async host models. Address/data widths and read/write counts come from the
+typed memory-port channels; host depth is derived from address width, matching
+SFC. Each selected wrapper instance has independent storage. Unsupported port
+ABIs, including combined read/write ports, fail explicitly. Storage remains
+uninitialized; this option does not enable DRAM zeroing.
+
+Commands may share an input token channel: native delivery tracking prevents
+early acknowledgement or repeat consumption while the RAM model services the
+commands serially. Distinct response fields may also share an output channel;
+native joins their handshakes until the complete packet is available. The
+transport producer holds a valid token/payload until its handshake. Host reset
+flushes protocol state while retaining memory contents. Multiple producers of
+the same response field are rejected. The portable CTests
+`goldengate-multicycle-ram-sharing` and
+`goldengate-multicycle-ram-response-join` require firtool and Verilator, and retain
+hashed SFC fixtures with regeneration sources. They cover model behavior, not
+whole-design formal equivalence or an FPGA/Linux run.
+
+Feature-specific full-design Jasper inputs can be selected with
+`automation/chia_firesim_circt/run_jasper.py --input-manifest <manifest.json>
+--profile <exact PLATFORM_CONFIG>`. The schema and validation are in
+`automation/chia_firesim_circt/jasper_feature_inputs.py`. The manifest binds
+both complete RTL files and native memory-origin collateral to one hashed
+elaboration inventory and exact enabled profile. Set `CHIA_INPUT_IDENTITY` to
+the manifest's `input_design_identity` and `CHIA_REPORT_PATH` to a fresh result
+path. Run `--mode lec` and `--mode sec` separately. `--stage-only` validates and
+stages locally without starting Jasper; a staged result is explicitly unproven.
+Explicit feature inputs never fall back to archived baseline outputs. Preserve
+the default 24-hour/128-GiB proof limits and coordinate with existing remote
+proofs; this standalone adapter does not provide a host-global queue.
+
 Synthesized target assertions are opt-in. Add `WithSynthAsserts` to the platform
 configuration (for example, `WithSynthAsserts_BaseF2Config`), or pass
 `GOLDENGATE_CIRCT_SYNTH_ASSERTS=enabled` to make. Direct native compiler invocations
