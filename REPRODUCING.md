@@ -73,6 +73,24 @@ builds and direct RTL builds. The manager explicitly selects CIRCT, and the make
 rules reject SFC selection. Separate golden-reference tools invoke Scala SFC
 directly for comparisons.
 
+Synthesized target assertions are opt-in. Add `WithSynthAsserts` to the platform
+configuration (for example, `WithSynthAsserts_BaseF2Config`), or pass
+`GOLDENGATE_CIRCT_SYNTH_ASSERTS=enabled` to make. Direct native compiler invocations
+accept `--enable-synth-asserts`. The compiler exports native FIRRTL assertions and
+legacy failing `stop`/`printf` pairs through the instance hierarchy, grouping
+them by target clock. The assertion bridge reports the failure ID, message and
+target cycle using the existing `synthesized_assertions_t` driver. Its token
+queue stalls at an enabled failure; the driver can resume it, and
+`+disable-asserts` disables runtime checking. Global reset conditions mask
+failures; instance exclusions suppress the selected instance paths. Successful
+`stop(0)` operations are preserved. Assertions with undriven clocks are omitted
+as in SFC; ambiguous clock roots are rejected.
+
+The native regression tests cover assertion export and host bridge behavior.
+The earlier seven F2 Linux representatives do not establish synthesized
+assertion coverage; enabled assertion hardware still needs its own matched SFC,
+F2/runtime and formal signoff.
+
 The seven bounded feature representatives and exact compiler flags live in
 `automation/chia_firesim_circt/feature_cases.yaml`:
 

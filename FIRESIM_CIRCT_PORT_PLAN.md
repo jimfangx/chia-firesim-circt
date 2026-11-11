@@ -1,3 +1,19 @@
+# Synthesized assertions — November 11, 2026
+
+The opt-in `WithSynthAsserts`/`--enable-synth-asserts` native path now implements:
+native assertion and legacy failing-stop export, hierarchy and instance
+exclusions, clock-domain grouping, global-reset masking, queued host transport,
+failure ID/message/cycle MMIO, resume/disable controls, and existing runtime
+driver/header integration. Five native tests pass, including a 6,000-cycle
+generated-RTL reference-model check and runtime-header compilation. Rocket
+compiles with 650 assertions across two domains; the combined AutoCounter/Print
+case compiles with 650 assertions in one domain. Disabled native RTL and runtime
+collateral match the saved Rocket output byte for byte. Evidence is under
+`/scratch/jfx/synth-assertions-20261111/`, including failed integration attempts.
+These local checks are development evidence; require matched SFC
+comparisons and enabled F2/runtime and Jasper verification before claiming
+assertion feature signoff. Existing seven-case Linux passes predate this feature.
+
 # Source distribution checkpoint — November 10, 2026
 
 The integrated implementation passed all seven enabled F2 Linux/runtime/
