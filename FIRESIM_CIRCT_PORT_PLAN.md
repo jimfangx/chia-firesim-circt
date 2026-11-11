@@ -1,3 +1,91 @@
+# Parameterized native control routing — November 11, 2026
+
+The native control path now derives geometry from the complete allocated widget
+catalog, matching the legacy Scala router's parameterization. For N normal
+regions, one-hot routes have N bits and encoded targets have ceil(log2(N+1))
+bits, including the error endpoint at index N. The write-route queue has N
+entries. Read/write trackers retain their independent 64 transaction slots and
+12-bit tags; route data widths and retirement-port counts grow with N.
+
+Removed the 63-region checks consistently from allocation, decoder, widget
+binding, AR/AW/W dispatch, read/write tracking, both response arbiters and late
+widget bindings. TracerV and NIC bank discovery accepts larger contiguous
+constructor-index catalogs. Actual address-space overflow, overlapping regions,
+malformed names, missing banks, duplicate identities and incompatible port
+schemas still reject. FIRRTL width/i32-index representability is checked before
+narrowing catalog sizes. Existing supported control-bus profiles (25/32-bit
+addresses and 12-bit IDs) are unchanged; this work does not claim arbitrary AXI
+parameter support or unrestricted whole-design SFC equivalence.
+
+Validation:
+
+- Eleven focused CTest executables pass, including read/write tracker collision,
+  retirement and reset stress checks at 64, 65 and 128 regions.
+- Composed generated-IR execution passes for 1, 63, 64, 65, 127, 128 and 129
+  regions, exercising high one-hot bits, queue fill/stall/drain/wrap/reset,
+  independent AW/W dispatch, AR tracker backpressure and high-index arbitration.
+- Mixed production catalog fixtures with 64 and 65 NICs plus the same number of
+  TracerV banks pass allocation (138 and 140 total regions). Existing malformed
+  catalog and actual address-capacity rejection cases are retained.
+- Full composed control IR for the 1-region and 63-region cases is byte-identical
+  before/after this change. The original implementation rejects the 64-region
+  negative control.
+- The independently generated 64-MegaBoom/FAME5 checkpoint passes allocation of
+  74 regions including 64 TracerV widgets, then decoder, write queue, AW/W
+  dispatch, actual widget binding, AR dispatch/tracker, R/B arbiters, AW tracker,
+  SimulationMaster bank attachment, MCR mapping and final binding. IR verification
+  passes after every stage. This checkpoint replay does not establish final RTL,
+  Vivado, FPGA workload or Jasper success.
+
+The count parameterization, earlier clock-alias proof, shared-source fanout
+repair and lookup improvements use catalog/IR connectivity rather than design
+names or tile counts. No BOOM-specific or 64-core special case was added.
+Evidence: `/scratch/jfx/control-region-audit-20261111/` (production replay log,
+geometry tests and before/after IR comparison).
+
+# 64-tile MegaBoomV3 / FAME5 production integration audit — November 11, 2026
+
+The supplied 64-tile config (trace enabled before cloning), tested with
+`WithModelMultiThreading_WithMultiCycleRamModels_FRFCFS16GBQuadRankLLC4MB_BaseF2Config`,
+initially stopped before RTL emission at the control catalog's 63-region limit
+(now repaired by the parameterization above).
+`ControlAddressDecode.cpp` rejected TracerV bank index 63; the read/write routing
+interfaces also assumed 1–63 regions. Sixty-four TracerV widgets exceeded
+that limit before other peripherals are counted. All 64 configuration/MCR
+pairs exist with contiguous indices 0–63; the initial failure was a capacity
+rejection, not a missing bank. The follow-up repairs all affected stages and
+the matching NIC bank-index cap while retaining real address-space bounds.
+
+Completed in this audit:
+
+- Reproduced the reported clock failure after exactly 6,148 passthrough promotions.
+  All 261 hub clock ports structurally resolve to one physical clock root.
+  Clock inference now proves hierarchical/feedback aliases, accepts repeated
+  identical clock drivers and selects a component-local alias rooted in the
+  declared hub domain. Genuine clock ambiguity remains rejected; existing
+  unambiguous clock names and the four-clock SFC SRAM fixture are preserved.
+- Fixed redundant model-source fanout connections in ChannelExcision, allowing
+  InferModelPorts to complete without weakening its uniqueness checks.
+- Constructed and verified the complete FAME graph: four definitions, 193 logical
+  model instances, 28,834 data endpoints, one clock domain and one physical
+  threading group with 64 shared threads. Both selected RAM definitions were
+  materialized. Host UART, TracerV, CPU streams, LoadMem and memory-controller
+  integration reached control-address allocation.
+- Removed three read-only/dormant-path costs: a repeated full connection scan,
+  whole-port-list construction for single-port metadata, and debug-target
+  transfers when no debug targets exist. Sixteen focused tests pass; twelve
+  generated graph/RTL/annotation artifacts are byte-identical across four
+  before/after fixture runs. A complete optimized 64-tile compile remains
+  unverified; these audit times are not speed benchmarks.
+
+Evidence and retained checkpoints:
+`/scratch/jfx/boom64-native-audit-20261111/audit-result.json`.
+The pre-allocation checkpoint is
+`native-component/post-fame-fased-frfcfs-mmio-bank.mlir` under that directory.
+Local elaboration required recorded clone-safe TraceIO/prototype-annotation
+front-end overlays; those sources were restored after generating the audit
+inputs. No Vivado, FPGA workload or Jasper run was launched for this audit.
+
 # WithMultiCycleRamModels SFC parity repairs — November 11, 2026
 
 The bounded SFC source/executable audit found and repaired these supported-case
