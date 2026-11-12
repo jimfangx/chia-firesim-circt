@@ -12,8 +12,12 @@ TARGET_COPY_TO_MIDAS_SCALA_DIRS := \
 $(FIRRTL_FILE) $(ANNO_FILE) &: SHELL := /usr/bin/env bash # needed for running source in recipe
 $(FIRRTL_FILE) $(ANNO_FILE) &: firesim_target_symlink_hook
 	@mkdir -p $(@D)
-	source $(chipyard_dir)/env.sh && \
-		make -C $(CHIPYARD_STAGING_DIR) \
+	# The native compiler and Scala frontend have independent inputs. Bootstrap
+	# under the manager environment while the frontend sources Chipyard's env;
+	# the supervisor joins both and propagates either failure before publication.
+	$(if $(filter circt,$(GOLDENGATE_COMPILER)),$(goldengate_circt_frontend_prefix)) \
+		/usr/bin/env bash -c 'source "$$1/env.sh" && shift && make "$$@"' \
+		firesim-chipyard "$(chipyard_dir)" -C "$(CHIPYARD_STAGING_DIR)" \
 			SBT_PROJECT=$(TARGET_SBT_PROJECT) \
 			MODEL=$(DESIGN) \
 			MODEL_PACKAGE=$(DESIGN_PACKAGE) \

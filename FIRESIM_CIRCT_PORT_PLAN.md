@@ -1,3 +1,146 @@
+# Production build latency — November 12, 2026
+
+Optimize the production flow, including safe incremental reuse. Evaluation
+starts each configuration independently without pregenerated compiler/design/
+driver artifacts or caches inherited from another configuration; it is not a
+reason to disable production caching or introduce special evaluation paths.
+Eliminating duplicate work within one normal build is a valid cold-path gain.
+Keep cold, incremental and compiler-only measurements distinct, with matched
+inputs and resource limits. Do not claim a full pre-Vivado speedup from warm
+reuse, component timings, checkpoint resumes or mismatched elaborations.
+
+The normal FireSim path now validates content-bound publication receipts so
+`replace-rtl` followed by `driver` compiles the design once. Native compiler
+builds are shared safely across ordinary production recipes, and independent
+compiler bootstrap and Firechip elaboration overlap with a mandatory join.
+Driver compilation uses available CPUs. Compiler precompiled headers reduce
+repeated C++ header parsing; two fresh paired local observations reduced native
+bootstrap time by roughly 14–15%, with identical tested compiler outputs. That
+component result does not establish a full cold-flow improvement over SFC.
+See `sims/firesim/sim/goldengate-circt/PRODUCTION_BUILD.md` for invalidation,
+cancellation, configuration overrides and measurement requirements.
+
+FAME graph planning now shares one caller-owned immutable hierarchy/channel
+snapshot and indexed bindings across model queries. It preserves duplicates,
+payload order, ambiguity and clock checks, and destroys the context before
+mutating the IR. Fourteen fixture modes preserve their outcomes and all 36
+generated artifacts are byte-identical. Clock tracing separately indexes each
+queried module's original driver connections once, preserving reverse
+last-connect priority, aggregate-prefix matching and projection creation. Ten
+precedence/order/error cases and 62 existing F2/Alveo CLI artifacts are
+byte-identical before/after that change. Evidence is under
+`/scratch/jfx/fame-planning-20261112/`; these equivalence checks do not establish
+an end-to-end speedup.
+
+Per-channel collision and shared-definition checks use direct name/type/direction
+getters instead of constructing complete `PortInfo` vectors. Scalar any-match
+and multiport last-match behavior are preserved: 94 CLI outcomes agree and all
+64 generated artifacts are byte-identical; the integrated 24-test selection
+passes. Profiling also identifies repeated wide signature rebuilding and
+context-retained attribute arrays as a larger remaining cost. A batched
+signature-update strategy requires a separate transformation review and
+validation effort.
+
+Controlled compiler-only observations on the same EDA host and identical frozen
+SFC-compatible 64-MegaBoom/FAME5 FIRRTL and annotation inputs:
+
+| Invocation | Complete compiler wall time |
+| --- | ---: |
+| SFC reference | 3,699.24 s |
+| CIRCT before the eight getter replacements | 1,389.40 s |
+| CIRCT with the getter replacements | 1,320.29 s |
+
+The observed SFC/final-CIRCT ratio is 2.80x. The final getter patch reduced this
+single paired observation by 4.97%; these are individual fresh processes, not
+medians. Both native runs use matching CPU affinity and process limits. All
+stages run from input parsing through final RTL emission, without checkpoint
+resumption or debug snapshots. Executable bootstrap, elaboration, driver
+compilation, Vivado and workload execution are outside this interval. This does
+not establish a complete cold pre-Vivado speedup or native-frontend timing.
+
+All 125 non-listing output files are byte-identical across the native pair. The
+remaining resource-list file differs only in its output-directory prefix;
+resource identities and all finalized RTL/header/constraint artifacts match
+exactly. Full SFC public-contract and paired RTL/driver syntax checks pass, with
+their dependency bindings revalidated for this exact-output reuse. Internal
+channel inventory differences remain recorded and unwaived. Receipts, source
+manifests and comparison evidence are in
+`/scratch/jfx/native-profile-20261112/result.json`.
+
+# 64-tile FAME5 clock preservation and parity checks — November 12, 2026
+
+The requested target is audited with
+`WithModelMultiThreading_WithMultiCycleRamModels_FRFCFS16GBQuadRankLLC4MB_BaseF2Config`
+so both model sharing and extracted multi-cycle register files are enabled.
+
+The reported 63 uninitialized `iregfile_regfile_clk` inputs are a native-port
+integration defect. `FindDefaultClocks` could prove their physical clock aliases,
+but `ChannelExcision` split the nets before `FAMEModelGraph` consumed that proof.
+The ancillary scalar inputs then survived the transformation without drivers.
+
+The repair retains unique input-to-domain proofs before excision. The graph
+rewrite consumes them transactionally, replaces each redundant input with a
+driven local wire, and routes its consumers through the declared domain's normal
+token-controlled clock gate. Associated clock metadata follows the canonical
+domain. Unproved clocks, stale proofs, conflicting domains and attached port
+identities without a relocation policy reject. A graph invariant catches
+remaining scalar target-clock inputs before RTL emission. No BOOM name, tile
+count, frequency or thread count is hardcoded in this repair.
+
+Validation completed:
+
+- Fifteen focused CTests pass. Alias fixtures have 1, 3 and 63 live feedback
+  clocks across two domains, including active channel transport, real RTL
+  emission, atomic rejection cases and a missing-driver negative control.
+- The repaired emitted model matches 576 SFC model-interface/state rows under
+  independent channel stalls and clock/reset schedules. A wrong-domain mutation
+  fails the comparison.
+- Fresh unchanged SFC implementations and CIRCT agree at 64 threads for register
+  state, grouped-model scheduling, asynchronous RAM and synchronous RAM. Both
+  generated RTL implementations run the same independent public-interface
+  scoreboards. The RAM checks exercise response banking, stalls, masks and
+  defined old-data collisions; production DRAM zeroing is unchanged.
+- The complete supplied configuration, with trace enabled before cloning, has
+  64 MegaBoomV3 tiles, 64 TracerV bridges and two selected register-file model
+  definitions. Matching native/SFC elaborations have byte-identical design
+  bodies and identical selected input annotations. The production checkpoint
+  records exactly 63 alias proofs for one declared clock domain.
+- The complete rewritten graph has 63 driven alias wires, zero ancillary scalar
+  clock inputs, 193 logical model instances and one 64-thread BOOM group. All
+  aliases connect to the declared domain's token-gated clock. Full bridge
+  extraction matches SFC exactly (71 bridge and 2,591 channel records).
+
+The inferred internal channel inventories differ between the two compilers;
+those differences are retained in `full-prebuild-boundaries.json` and are not
+waived by the bridge comparison. Do not label this complete SFC equivalence.
+
+The full run also exposed repeated read-only port scans in `FPGATopShell`.
+Clock targets are now collected once and matched during one module-port scan,
+preserving the same exact target identities and rejection checks. On this input
+that reduces port visits from 2,091,313,878 to 111,323. The indexed transformation
+passes the wrapper tests and accepts the complete F2 platform checkpoint,
+including the source-stream acknowledgment profile. Comparison with the
+original wrapper checkpoint is byte-identical for the complete 893,026,640-byte
+IR file (`platform-clock-index-comparison.json`). These checks are not a
+compiler-speed benchmark.
+
+Full-design native RTL emission passes and produces `FireSim-generated.sv`
+(248,104,425 bytes), driver headers and FPGA collateral. Complete finalized RTL
+lint (with the actual archived blackboxes and functional BUFGCE) and compilation
+of the complete driver header against the real driver declarations both pass.
+The matched complete SFC compile and paired final-contract/syntax checks also
+pass: top interfaces, driver ABI (including the declared F2 stream-ACK
+extension), constraints, stream catalog and partition collateral agree. Both
+complete RTL outputs and driver headers pass their respective syntax checks.
+Evidence is under `/scratch/jfx/boom64-clock-repair-20261112/`, including
+`full-output-comparison.json` and `full-paired-syntax/`. The native check resumes the
+exact retained production checkpoint at `FindDefaultClocks`; earlier stages
+were executed from the generated input. This is not an end-to-end timing
+benchmark. 64-tile FPGA operation and whole-design Jasper proofs remain
+acceptance obligations, not implied by the
+bounded tests above. The explicitly requested 64-tile audit does not expand or
+replace the loop's four baseline semantic targets.
+
 # Parameterized native control routing — November 11, 2026
 
 The native control path now derives geometry from the complete allocated widget
